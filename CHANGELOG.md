@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.3
+
+**Release Date:** 2026-03-01
+
+### Improvements
+- Added support for Cync deviceType `72` (Indoor 32ft Premium Light Strip)
+- Updated device classification so deviceType `72` is configured as a Lightbulb accessory (instead of a Switch)
+
+### Notes
+- After updating, restart Homebridge (or the Cync child bridge) so the accessory can be reconfigured.
+- If the device was previously bridged as a Switch, it should automatically migrate to a Lightbulb on restart. If it does not, remove the accessory from Home and restart Homebridge.
+
 ## v0.2.1
 
 **Release Date:** 2026-01-09

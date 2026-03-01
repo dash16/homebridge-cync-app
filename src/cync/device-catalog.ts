@@ -60,6 +60,19 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 			supportsCt: false,
 		},
 	},
+	72: {
+		deviceType: 72,
+		modelName: 'Indoor 32ft Premium Light Strip',
+		marketingName: 'Dynamic Effects Smart Light Strip (32ft)',
+		defaultCategory: Categories.LIGHTBULB,
+		notes: 'Full color light strip.',
+		defaultCapabilities: {
+			isLight: true,
+			supportsBrightness: true,
+			supportsColor: true,
+			supportsCt: true,
+		},
+	},
 	110: {
 		deviceType: 110,
 		modelName: 'Direct Connect Strip - Thin Style (16ft)',

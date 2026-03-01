@@ -31,7 +31,7 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 });
 
 function isCyncLightDeviceType(deviceType: number | undefined): boolean {
-	return deviceType === 46 || deviceType === 123 || deviceType === 137 || deviceType === 171;
+	return deviceType === 46 || deviceType === 72|| deviceType === 110|| deviceType === 123 || deviceType === 137 || deviceType === 171;
 }
 
 function getDefaultCapabilitiesForDeviceType(deviceType: number | undefined): CyncCapabilityProfile {
@@ -107,8 +107,6 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	}
 
 	private startPollingDevice(deviceId: string): void {
-		// For now this is just a placeholder hook. We keep a timer per device so
-		// you can later add a real poll (e.g. TCP “ping” or cloud get) here if you want.
 		const existing = this.devicePollTimers.get(deviceId);
 		if (existing) {
 			clearInterval(existing);

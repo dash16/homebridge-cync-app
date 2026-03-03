@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.4
+
+**Release Date:** 2026-03-02
+
+### Fixes
+- Corrected classification of Cync plug device types (64, 65, 172) to use HomeKit `Outlet` service instead of `Switch`
+- Resolved issue where plugs displayed “Display As Light/Fan/Switch” in Home.app
+- Fixed HomeKit control regression caused by service-type mismatch
+
+### Improvements
+- Added dedicated `cync-outlet-accessory.ts` module
+- Improved LAN update handling to support `Service.Outlet`
+- Ensured proper context initialization and device mapping for Outlet accessories
+- Mirrored `OutletInUse` characteristic for improved Home.app consistency
+
 ## v0.2.3
 
 **Release Date:** 2026-03-01

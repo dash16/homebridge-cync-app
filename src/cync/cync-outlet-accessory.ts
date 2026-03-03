@@ -1,10 +1,11 @@
-// src/cync/cync-switch-accessory.ts
+// src/cync/cync-outlet-accessory.ts
+
 import type { PlatformAccessory } from 'homebridge';
 import type { CyncDevice, CyncDeviceMesh } from './config-client.js';
 import type { CyncAccessoryContext, CyncAccessoryEnv } from './cync-accessory-helpers.js';
-import { applyAccessoryInformationFromCyncDevice } from './cync-accessory-helpers.js';
+import { applyAccessoryInformationFromCyncDevice, resolveDeviceType } from './cync-accessory-helpers.js';
 
-export function configureCyncSwitchAccessory(
+export function configureCyncOutletAccessory(
 	env: CyncAccessoryEnv,
 	mesh: CyncDeviceMesh,
 	device: CyncDevice,
@@ -12,19 +13,30 @@ export function configureCyncSwitchAccessory(
 	deviceName: string,
 	deviceId: string,
 ): void {
-	const service =
-		accessory.getService(env.api.hap.Service.Switch) ||
-		accessory.addService(env.api.hap.Service.Switch, deviceName);
+	// Remove stale services if present (service-type changes must be cleaned up)
+	const existingSwitch = accessory.getService(env.api.hap.Service.Switch);
+	if (existingSwitch) {
+		env.log.info(
+			'Cync: removing stale Switch service from %s (deviceId=%s) before configuring as Outlet',
+			deviceName,
+			deviceId,
+		);
+		accessory.removeService(existingSwitch);
+	}
 
 	const existingLight = accessory.getService(env.api.hap.Service.Lightbulb);
 	if (existingLight) {
 		env.log.info(
-			'Cync: removing stale Lightbulb service from %s (deviceId=%s) before configuring as Switch',
+			'Cync: removing stale Lightbulb service from %s (deviceId=%s) before configuring as Outlet',
 			deviceName,
 			deviceId,
 		);
 		accessory.removeService(existingLight);
 	}
+
+	const service =
+		accessory.getService(env.api.hap.Service.Outlet) ||
+		accessory.addService(env.api.hap.Service.Outlet, deviceName);
 
 	applyAccessoryInformationFromCyncDevice(env.api, accessory, device, deviceName, deviceId);
 
@@ -36,6 +48,9 @@ export function configureCyncSwitchAccessory(
 		productId: device.product_id,
 		on: false,
 	};
+
+	// Populate deviceType so platform-side default capabilities work as intended
+	ctx.cync.deviceType = resolveDeviceType(device);
 
 	// Remember mapping for LAN updates
 	env.registerAccessoryForDevice(deviceId, accessory);
@@ -49,7 +64,7 @@ export function configureCyncSwitchAccessory(
 
 			if (env.isDeviceProbablyOffline(deviceId)) {
 				env.log.debug(
-					'Cync: Switch On.get offline-heuristic hit; returning cached=%s for %s (deviceId=%s)',
+					'Cync: Outlet On.get offline-heuristic hit; returning cached=%s for %s (deviceId=%s)',
 					String(currentOn),
 					deviceName,
 					deviceId,
@@ -58,7 +73,7 @@ export function configureCyncSwitchAccessory(
 			}
 
 			env.log.info(
-				'Cync: On.get -> %s for %s (deviceId=%s)',
+				'Cync: Outlet On.get -> %s for %s (deviceId=%s)',
 				String(currentOn),
 				deviceName,
 				deviceId,
@@ -71,7 +86,7 @@ export function configureCyncSwitchAccessory(
 
 			if (!cyncMeta?.deviceId) {
 				env.log.warn(
-					'Cync: Switch On.set called for %s but no cync.deviceId in context',
+					'Cync: Outlet On.set called for %s but no cync.deviceId in context',
 					deviceName,
 				);
 				return;
@@ -80,7 +95,7 @@ export function configureCyncSwitchAccessory(
 			const on = value === true || value === 1;
 
 			env.log.info(
-				'Cync: Switch On.set -> %s for %s (deviceId=%s)',
+				'Cync: Outlet On.set -> %s for %s (deviceId=%s)',
 				String(on),
 				deviceName,
 				cyncMeta.deviceId,
@@ -90,22 +105,15 @@ export function configureCyncSwitchAccessory(
 			cyncMeta.on = on;
 
 			try {
-				if (!on) {
-					await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on: false });
-					env.markDeviceSeen(cyncMeta.deviceId);
-					return;
-				}
-
-				if (cyncMeta.colorActive && cyncMeta.rgb && typeof cyncMeta.brightness === 'number') {
-					await env.tcpClient.setColor(cyncMeta.deviceId, cyncMeta.rgb, cyncMeta.brightness);
-				} else {
-					await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on: true });
-				}
-
+				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on });
 				env.markDeviceSeen(cyncMeta.deviceId);
+
+				if (service.testCharacteristic(env.api.hap.Characteristic.OutletInUse)) {
+					service.updateCharacteristic(env.api.hap.Characteristic.OutletInUse, on);
+				}
 			} catch (err) {
 				env.log.warn(
-					'Cync: Switch On.set failed for %s (deviceId=%s): %s',
+					'Cync: Outlet On.set failed for %s (deviceId=%s): %s',
 					deviceName,
 					cyncMeta.deviceId,
 					(err as Error).message ?? String(err),

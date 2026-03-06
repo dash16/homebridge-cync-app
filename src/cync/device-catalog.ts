@@ -34,6 +34,18 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 			supportsCt: true,
 		},
 	},
+	48: {
+		deviceType: 48,
+		modelName: 'Cync Smart Dimmer Switch',
+		marketingName: 'Cync Smart Dimmer',
+		defaultCategory: Categories.LIGHTBULB,
+		defaultCapabilities: {
+			isLight: true,
+			supportsBrightness: true,
+			supportsColor: false,
+			supportsCt: false,
+		},
+	},
 	64: {
 		deviceType: 64,
 		modelName: 'Indoor Smart Plug (CPLGSTDBLW1)',

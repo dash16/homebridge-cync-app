@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.5
+
+**Release Date:** 2026-03-06
+
+### Improvements
+- Added support for Cync dimmer switches reported as device type `48`
+- Routed device type `48` through the light accessory path so dimmer switches are exposed to HomeKit as lights instead of simple on/off switches
+- Added catalog metadata for device type `48` so supported dimmer switches identify more cleanly in HomeKit
+
+### Notes
+- This release adds support for dimming on Cync dimmer switches that report as device type `48`
+- Existing accessories that were previously cached as switches may need to be removed and re-added in Home/Homebridge so they can be recreated with brightness support
+- Related issue: #11
+
 ## v0.2.4
 
 **Release Date:** 2026-03-02

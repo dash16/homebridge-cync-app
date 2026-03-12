@@ -111,6 +111,32 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 			supportsCt: true,
 		},
 	},
+	128: {
+		deviceType: 128,
+		modelName: 'Soft White Direct Connect Smart Bulb',
+		marketingName: 'GE Cync Soft White General Purpose A19 60W Replacement Smart LED Bulbs',
+		notes: 'Reported by users as white + dimming bulbs',
+		defaultCategory: Categories.LIGHTBULB,
+		defaultCapabilities: {
+			isLight: true,
+			supportsBrightness: true,
+			supportsColor: false,
+			supportsCt: false,
+		},
+	},
+	131: {
+		deviceType: 131,
+		modelName: 'Full Color Direct Connect Smart Bulb',
+		marketingName: 'GE Cync A19 Direct Connect LED Light Bulb, Color Changing Clear Smart Light, Matter Compatible, Works with Alexa and Google Home',
+		notes: 'Reported by users as full color + dimming bulbs',
+		defaultCategory: Categories.LIGHTBULB,
+		defaultCapabilities: {
+			isLight: true,
+			supportsBrightness: true,
+			supportsColor: true,
+			supportsCt: true,
+		},
+	},
 	137: {
 		deviceType: 137,
 		modelName: 'A19 Full Color Direct Connect Smart Bulb (3-in-1)',

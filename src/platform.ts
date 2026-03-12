@@ -32,7 +32,7 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 });
 
 function isCyncLightDeviceType(deviceType: number | undefined): boolean {
-	return deviceType === 46 || deviceType === 48 || deviceType === 72|| deviceType === 110|| deviceType === 123 || deviceType === 137 || deviceType === 171;
+	return deviceType === 46 || deviceType === 48 || deviceType === 72|| deviceType === 110|| deviceType === 123 || deviceType === 128 || deviceType === 131 || deviceType === 137 || deviceType === 171;
 }
 
 function isCyncOutletDeviceType(deviceType: number | undefined): boolean {

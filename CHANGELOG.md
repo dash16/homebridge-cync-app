@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.2.4 — Direct Connect Bulb Support
+
+**Release Date:** 2026-03-11
+
+### Improvements
+
+- Added support for Cync device type `128` as a dimmable lightbulb
+- Added support for Cync device type `131` as a full-color lightbulb
+- Updated platform routing so device types `128` and `131` are configured as Lightbulb accessories instead of Switch accessories
+- Added catalog entries for device types `128` and `131` with appropriate default capabilities
+- Enabled brightness support for device type `128`
+- Enabled brightness, color, and color temperature support for device type `131`
+
+### Notes
+
+- Existing cached Switch accessories for these bulbs should be automatically cleaned up and recreated as Lightbulb accessories by the platform
+- Device type `131` is exposed with color temperature support to allow Home app white swatches, even if the native bulb behavior is closer to color-based white matching
+
 ## v0.2.5
 
 **Release Date:** 2026-03-06

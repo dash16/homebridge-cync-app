@@ -126,7 +126,7 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 	},
 	131: {
 		deviceType: 131,
-		modelName: 'Full Color Direct Connect Smart Bulb',
+		modelName: 'Full Color Direct Connect Smart Bulb (A19) (3in1)',
 		marketingName: 'GE Cync A19 Direct Connect LED Light Bulb, Color Changing Clear Smart Light, Matter Compatible, Works with Alexa and Google Home',
 		notes: 'Reported by users as full color + dimming bulbs',
 		defaultCategory: Categories.LIGHTBULB,

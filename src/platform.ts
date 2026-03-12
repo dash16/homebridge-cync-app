@@ -31,12 +31,33 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 	error: log.error.bind(log),
 });
 
+// Known Cync device types that should be treated as Lightbulb accessories
+const CYNC_LIGHT_DEVICE_TYPES = new Set<number>([
+	46,
+	48,
+	72,
+	110,
+	123,
+	128,
+	131,
+	137,
+	171,
+]);
+
 function isCyncLightDeviceType(deviceType: number | undefined): boolean {
-	return deviceType === 46 || deviceType === 48 || deviceType === 72|| deviceType === 110|| deviceType === 123 || deviceType === 128 || deviceType === 131 || deviceType === 137 || deviceType === 171;
+	return deviceType !== undefined && CYNC_LIGHT_DEVICE_TYPES.has(deviceType);
 }
 
+
+// Known Cync device types that should be treated as Outlet accessories
+const CYNC_OUTLET_DEVICE_TYPES = new Set<number>([
+	64,
+	65,
+	172,
+]);
+
 function isCyncOutletDeviceType(deviceType: number | undefined): boolean {
-	return deviceType === 64 || deviceType === 65 || deviceType === 172;
+	return deviceType !== undefined && CYNC_OUTLET_DEVICE_TYPES.has(deviceType);
 }
 
 function getDefaultCapabilitiesForDeviceType(deviceType: number | undefined): CyncCapabilityProfile {

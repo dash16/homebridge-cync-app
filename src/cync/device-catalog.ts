@@ -150,6 +150,19 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 			supportsCt: true,
 		},
 	},
+	142: {
+		deviceType: 142,
+		modelName: '4" Full Color Wafer Downlight',
+		marketingName: 'CYNC Wafer Smart LED Downlight',
+		notes: 'Reported by users as full color + dimming bulbs',
+		defaultCategory: Categories.LIGHTBULB,
+		defaultCapabilities: {
+			isLight: true,
+			supportsBrightness: true,
+			supportsColor: true,
+			supportsCt: true,
+		},
+	},
 	171: {
 		deviceType: 171,
 		modelName: 'A19 Full Color Direct Connect Smart Bulb (3-in-1)',

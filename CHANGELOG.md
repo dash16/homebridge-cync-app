@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.7
+
+**Release Date:** 2026-04-27
+
+### ✨ Added
+- Support for new Cync light device type (PR #13>)
+- Expanded device type detection for light accessories
+
+### 🧪 Notes
+- Users with the new device type should see it automatically discovered after restart
+- If devices do not appear correctly, restart Homebridge or clear cached accessories
+
 ## v0.2.4 — Direct Connect Bulb Support
 
 **Release Date:** 2026-03-11

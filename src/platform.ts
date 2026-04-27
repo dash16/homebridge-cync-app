@@ -41,6 +41,7 @@ const CYNC_LIGHT_DEVICE_TYPES = new Set<number>([
 	128,
 	131,
 	137,
+	142,
 	171,
 ]);
 

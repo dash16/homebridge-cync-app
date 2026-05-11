@@ -224,7 +224,7 @@ export class CyncClient {
 							'CyncClient: a twoFactor code is still present in config. Cync verification codes expire quickly, so this code will not be reused.',
 						);
 						this.log.error(
-							'CyncClient: remove the stale twoFactor value from config, restart Homebridge to request a fresh code, then add the new code and restart again.',
+							'CyncClient: remove stale twoFactor value from config, request a fresh code, then add the new code and restart.',
 						);
 						return false;
 					}

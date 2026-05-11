@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.8
+
+**Release Date:** 2026-05-11
+
+### Fixes
+
+- Prevented stale Cync 2FA verification codes from being reused after a refresh token failure.
+- Improved login failure behavior when a stored refresh token is no longer accepted by Cync.
+
+### Notes
+
+- If a refresh token has expired or been invalidated, users may need to remove the old `twoFactor` value from config, restart Homebridge, request a fresh Cync verification code, and restart again.
+
 ## v0.2.7
 
 **Release Date:** 2026-04-27

@@ -176,6 +176,10 @@ export class CyncClient {
 			},
 		);
 	}
+	private hasConfiguredTwoFactorCode(): boolean {
+		const code = this.loginConfig.twoFactor?.trim() ?? '';
+		return code.length > 0;
+	}
 
 	private isTokenExpiredOrStale(expiresAt: number | undefined, skewMs = 60_000): boolean {
 		if (!expiresAt || !Number.isFinite(expiresAt)) {
@@ -210,8 +214,20 @@ export class CyncClient {
 				const refreshed = await this.refreshAccessToken(stored);
 				if (!refreshed) {
 					this.log.error(
-						'CyncClient: unable to refresh stored token; falling back to interactive login.',
+						'CyncClient: unable to refresh stored token; reauthentication is required.',
 					);
+
+					this.tokenData = null;
+
+					if (this.hasConfiguredTwoFactorCode()) {
+						this.log.error(
+							'CyncClient: a twoFactor code is still present in config. Cync verification codes expire quickly, so this code will not be reused.',
+						);
+						this.log.error(
+							'CyncClient: remove the stale twoFactor value from config, restart Homebridge to request a fresh code, then add the new code and restart again.',
+						);
+						return false;
+					}
 				} else {
 					return true; // refreshAccessToken() already saves + applies
 				}

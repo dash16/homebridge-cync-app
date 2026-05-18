@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.0
+
+**Release Date:** 2026-05-18
+
+### Fixes
+
+- Fixed widespread LAN control failures where accessories appeared responsive in HomeKit but did not physically turn on or off.
+- Added resilient controller failover for Cync LAN commands.
+- Learned and reused working controller routes per device to avoid repeatedly sending through failing controllers.
+- Applied the routing fix across power, brightness, color temperature, and RGB color commands.
+
+### Notes
+
+- This resolves issue #9.
+- This release improves compatibility with older Cync accessories that no longer respond reliably through their originally reported controller route.
+
 ## v0.2.9 — Direct Connect Bulb Support
 
 **Release Date:** 2026-05-18

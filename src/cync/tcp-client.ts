@@ -3,7 +3,6 @@
 import { CyncCloudConfig, CyncLogger } from './config-client.js';
 import net from 'net';
 import tls from 'tls';
-import { miredToKelvin } from './cync-accessory-helpers.js';
 
 const defaultLogger: CyncLogger = {
 	debug: (...args: unknown[]) => console.debug('[cync-tcp]', ...args),
@@ -38,6 +37,11 @@ function scaleToByte(value: number, inMin: number, inMax: number, invert: boolea
 	const u = invert ? (1 - t) : t;
 	return clampNumber(Math.round(u * 255), 0, 255);
 }
+// TCP Hex Formatter: Makes packet dumps easier to compare byte-by-byte
+// Formats buffers as spaced hex so working and failing packets can be visually diffed.
+function formatHex(buffer: Buffer): string {
+	return buffer.toString('hex').match(/.{1,2}/g)?.join(' ') ?? '';
+}
 
 export type LanDeviceUpdate = {
 	deviceId: string;
@@ -57,6 +61,7 @@ export class TcpClient {
 		}
 		this.controllerToDevice.set(controllerId, deviceId);
 	}
+	private preferredControllerByDevice = new Map<string, number>();
 	private commandChain: Promise<void> = Promise.resolve();
 	private homeDevices: Record<string, string[]> = {};
 	private switchIdToHomeId = new Map<number, string>();
@@ -81,7 +86,16 @@ export class TcpClient {
 	private deviceBrightnessEncoding = new Map<string, 'pct100' | 'lvl254'>();
 	private readonly lanDeviceUpdateListeners: LanDeviceUpdateListener[] = [];
 	private observedNonTrivialLevel = new Map<string, boolean>();
-
+	private pendingPowerCommands = new Map<string, {
+		deviceId: string;
+		on: boolean;
+		controllerId: number;
+		meshIndex: number;
+		seq: number;
+		sentAt: number;
+		packetHex: string;
+		resolve?: (confirmed: boolean) => void;
+	}>();
 	public onLanDeviceUpdate(listener: LanDeviceUpdateListener): void {
 		this.lanDeviceUpdateListeners.push(listener);
 	}
@@ -476,6 +490,115 @@ export class TcpClient {
 		}, 180_000);
 	}
 
+	private getControllerCandidates(deviceId: string, primaryControllerId: number): number[] {
+		const preferred = this.preferredControllerByDevice.get(deviceId);
+		const homeId = this.switchIdToHomeId.get(primaryControllerId);
+		if (!homeId) {
+			return [primaryControllerId];
+		}
+
+		const controllers = [...this.switchIdToHomeId.entries()]
+			.filter(([, candidateHomeId]) => candidateHomeId === homeId)
+			.map(([controllerId]) => controllerId);
+
+		const ordered = [
+			preferred,
+			primaryControllerId,
+			...controllers,
+		].filter((controllerId): controllerId is number => controllerId !== undefined);
+
+		return [...new Set(ordered)];
+	}
+	// Reliable Controller Sender: Retries LAN packets through alternate controllers until state confirmation
+	// Centralizes controller failover so power, brightness, color temperature, and RGB commands use the same resilient routing.
+	private async sendWithControllerRetry(
+		deviceId: string,
+		record: Record<string, unknown>,
+		expectedOn: boolean,
+		packetBuilder: (controllerId: number, seq: number) => Buffer,
+		logLabel: string,
+	): Promise<void> {
+		const controllerId = Number(record.switch_controller);
+		const meshIndex = Number(record.mesh_id);
+
+		if (!Number.isFinite(controllerId) || !Number.isFinite(meshIndex)) {
+			this.log.warn(
+				'[Cync TCP] %s: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
+				logLabel,
+				deviceId,
+				record.switch_controller,
+				record.mesh_id,
+			);
+			return;
+		}
+
+		const socket = this.socket;
+		if (!socket || socket.destroyed) {
+			this.log.warn('[Cync TCP] %s: socket disappeared before command send.', logLabel);
+			return;
+		}
+
+		const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+		this.log.debug(
+			'[Cync TCP] %s controller candidates for device=%s primary=0x%s candidates=%s',
+			logLabel,
+			deviceId,
+			controllerId.toString(16).padStart(8, '0'),
+			controllerCandidates.map((candidate) => `0x${candidate.toString(16).padStart(8, '0')}`).join(', '),
+		);
+
+		for (const candidateControllerId of controllerCandidates) {
+			const seq = this.nextSeq();
+			const packet = packetBuilder(candidateControllerId, seq);
+
+			const rejected = await new Promise<boolean>((resolve) => {
+				this.pendingPowerCommands.set(`${candidateControllerId}:${seq}`, {
+					deviceId,
+					on: expectedOn,
+					controllerId: candidateControllerId,
+					meshIndex,
+					seq,
+					sentAt: Date.now(),
+					packetHex: packet.toString('hex'),
+					resolve: (confirmed) => resolve(!confirmed),
+				});
+
+				socket.write(packet);
+
+				this.log.info(
+					'[Cync TCP] Sent %s packet: device=%s on=%s seq=%d controller=0x%s',
+					logLabel,
+					deviceId,
+					String(expectedOn),
+					seq,
+					candidateControllerId.toString(16).padStart(8, '0'),
+				);
+
+				setTimeout(() => resolve(false), 300);
+			});
+
+			if (!rejected) {
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.debug(
+					'[Cync TCP] %s command accepted/no immediate rejection: device=%s controller=0x%s',
+					logLabel,
+					deviceId,
+					candidateControllerId.toString(16).padStart(8, '0'),
+				);
+
+				return;
+			}
+		}
+		this.log.warn(
+			'[Cync TCP] %s command not confirmed for device=%s on=%s after trying %d controller(s).',
+			logLabel,
+			deviceId,
+			String(expectedOn),
+			controllerCandidates.length,
+		);
+	}
 	private nextSeq(): number {
 		if (this.seq === 65535) {
 			this.seq = 1;
@@ -656,37 +779,28 @@ export class TcpClient {
 			}
 
 			const record = device as Record<string, unknown>;
-			this.log.debug(
-				'[Cync TCP] setSwitchState: deviceId=%s device_type=%o switch_controller=%o mesh_id=%o home_id=%o',
-				deviceId,
-				record.device_type,
-				record.switch_controller,
-				record.mesh_id,
-				record.home_id,
-			);
-			const controllerId = Number(record.switch_controller);
 			const meshIndex = Number(record.mesh_id);
 
-			if (!Number.isFinite(controllerId) || !Number.isFinite(meshIndex)) {
+			if (!Number.isFinite(meshIndex)) {
 				this.log.warn(
-					'[Cync TCP] Device %s is missing LAN fields (switch_controller=%o mesh_id=%o)',
+					'[Cync TCP] Device %s is missing mesh_id=%o',
 					deviceId,
-					record.switch_controller,
 					record.mesh_id,
 				);
 				return;
 			}
 
-			const seq = this.nextSeq();
-			const packet = this.buildPowerPacket(controllerId, meshIndex, params.on, seq);
-
-			// At this point socket has been validated above
-			this.socket.write(packet);
-			this.log.info(
-				'[Cync TCP] Sent power packet: device=%s on=%s seq=%d',
+			await this.sendWithControllerRetry(
 				deviceId,
-				String(params.on),
-				seq,
+				record,
+				params.on,
+				(candidateControllerId, seq) => this.buildPowerPacket(
+					candidateControllerId,
+					meshIndex,
+					params.on,
+					seq,
+				),
+				'power',
 			);
 		});
 	}
@@ -697,9 +811,10 @@ export class TcpClient {
 	public async setColorTemperature(
 		deviceId: string,
 		params: { mired: number; brightnessPct?: number; ctMinMired?: number; ctMaxMired?: number; invertTone?: boolean },
-		deviceType?: number,
+		_deviceType?: number,
 	): Promise<void> {
 		return this.enqueueCommand(async () => {
+			void _deviceType;
 			if (!this.config) {
 				this.log.warn('[Cync TCP] setColorTemperature: no config available.');
 				return;
@@ -720,10 +835,9 @@ export class TcpClient {
 			}
 
 			const record = device as Record<string, unknown>;
-			const controllerId = Number(record.switch_controller);
 			const meshIndex = Number(record.mesh_id);
 
-			if (!Number.isFinite(controllerId) || !Number.isFinite(meshIndex)) {
+			if (!Number.isFinite(meshIndex)) {
 				this.log.warn(
 					'[Cync TCP] setColorTemperature: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
 					deviceId,
@@ -751,35 +865,20 @@ export class TcpClient {
 			const invertTone = params.invertTone === true;
 			const tone = scaleToByte(mired, ctMinMired, ctMaxMired, invertTone);
 
-			const kelvin = miredToKelvin(mired);
-
-			const seq = this.nextSeq();
-
-			// Keep RGB at pure white so we’re in "white mode" while tone carries CT.
-			const packet = this.buildComboPacket(
-				controllerId,
-				meshIndex,
-				on,
-				level,
-				tone,
-				{ r: 255, g: 255, b: 255 },
-				seq,
-			);
-
-			this.socket.write(packet);
-
-			this.log.info(
-				'[Cync TCP] Sent combo (CT) packet: device=%s type=%s on=%s mired=%d (~%dK) tone=%d invert=%s brightness=%d level=%d seq=%d',
+			await this.sendWithControllerRetry(
 				deviceId,
-				String(deviceType),
-				String(on),
-				mired,
-				kelvin,
-				tone,
-				String(invertTone),
-				hkBrightness,
-				level,
-				seq,
+				record,
+				on,
+				(candidateControllerId, seq) => this.buildComboPacket(
+					candidateControllerId,
+					meshIndex,
+					on,
+					level,
+					tone,
+					{ r: 255, g: 255, b: 255 },
+					seq,
+				),
+				'combo CT',
 			);
 		});
 	}
@@ -790,9 +889,10 @@ export class TcpClient {
 	public async setBrightness(
 		deviceId: string,
 		brightnessPct: number,
-		deviceType?: number,
+		_deviceType?: number,
 	): Promise<void> {
 		return this.enqueueCommand(async () => {
+			void _deviceType;
 			if (!this.config) {
 				this.log.warn('[Cync TCP] setBrightness: no config available.');
 				return;
@@ -813,11 +913,9 @@ export class TcpClient {
 			}
 
 			const record = device as Record<string, unknown>;
-			this.log.debug('[Cync TCP] setBrightness: using deviceType=%s', String(deviceType));
-			const controllerId = Number(record.switch_controller);
 			const meshIndex = Number(record.mesh_id);
 
-			if (!Number.isFinite(controllerId) || !Number.isFinite(meshIndex)) {
+			if (!Number.isFinite(meshIndex)) {
 				this.log.warn(
 					'[Cync TCP] setBrightness: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
 					deviceId,
@@ -835,32 +933,20 @@ export class TcpClient {
 
 			const on = clamped > 0;
 			const level = hkBrightnessToPct100Byte(clamped);
-			const seq = this.nextSeq();
-
-			// Keep prior behavior: tone=254, RGB=white.
-			const packet = this.buildComboPacket(
-				controllerId,
-				meshIndex,
-				on,
-				level,
-				254,
-				{ r: 255, g: 255, b: 255 },
-				seq,
-			);
-
-			this.socket.write(packet);
-			this.log.info(
-				'[Cync TCP] Sent combo (brightness) packet: device=%s type=%s on=%s brightnessPct=%d level=%d tone=%d rgb=(%d,%d,%d) seq=%d',
+			await this.sendWithControllerRetry(
 				deviceId,
-				String(deviceType),
-				String(on),
-				clamped,
-				level,
-				254,
-				255,
-				255,
-				255,
-				seq,
+				record,
+				on,
+				(candidateControllerId, seq) => this.buildComboPacket(
+					candidateControllerId,
+					meshIndex,
+					on,
+					level,
+					254,
+					{ r: 255, g: 255, b: 255 },
+					seq,
+				),
+				'combo brightness',
 			);
 		});
 	}
@@ -869,9 +955,10 @@ export class TcpClient {
 		deviceId: string,
 		rgb: { r: number; g: number; b: number },
 		brightnessPct?: number,
-		deviceType?: number,
+		_deviceType?: number,
 	): Promise<void> {
 		return this.enqueueCommand(async () => {
+			void _deviceType;
 			if (!this.config) {
 				this.log.warn('[Cync TCP] setColor: no config available.');
 				return;
@@ -899,10 +986,9 @@ export class TcpClient {
 				record.device_type_id,
 				record.deviceTypeId,
 			);
-			const controllerId = Number(record.switch_controller);
 			const meshIndex = Number(record.mesh_id);
 
-			if (!Number.isFinite(controllerId) || !Number.isFinite(meshIndex)) {
+			if (!Number.isFinite(meshIndex)) {
 				this.log.warn(
 					'[Cync TCP] setColor: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
 					deviceId,
@@ -921,30 +1007,20 @@ export class TcpClient {
 			const g = Math.max(0, Math.min(255, Math.round(rgb.g)));
 			const b = Math.max(0, Math.min(255, Math.round(rgb.b)));
 
-			const seq = this.nextSeq();
-
-			const packet = this.buildComboPacket(
-				controllerId,
-				meshIndex,
-				on,
-				level,
-				254,
-				{ r, g, b },
-				seq,
-			);
-
-			this.socket.write(packet);
-			this.log.info(
-				'[Cync TCP] Sent color combo packet: device=%s type=%s on=%s hkBrightness=%d level=%d rgb=(%d,%d,%d) seq=%d',
+			await this.sendWithControllerRetry(
 				deviceId,
-				String(deviceType),
-				String(on),
-				hkBrightness,
-				level,
-				r,
-				g,
-				b,
-				seq,
+				record,
+				on,
+				(candidateControllerId, seq) => this.buildComboPacket(
+					candidateControllerId,
+					meshIndex,
+					on,
+					level,
+					254,
+					{ r, g, b },
+					seq,
+				),
+				'combo color',
 			);
 		});
 	}
@@ -970,7 +1046,14 @@ export class TcpClient {
 
 	private attachSocketListeners(socket: net.Socket): void {
 		socket.on('data', (chunk) => {
+			this.log.debug(
+				'[Cync TCP] RX raw chunk bytes=%d hex=%s',
+				chunk.byteLength,
+				formatHex(chunk),
+			);
+
 			this.log.debug('[Cync TCP] received %d bytes from server', chunk.byteLength);
+
 			this.readBuffer = Buffer.concat([this.readBuffer, chunk]);
 			this.processIncoming();
 		});
@@ -1023,8 +1106,48 @@ export class TcpClient {
 			);
 
 			if (type === 0x7b && body.length >= 6) {
+				const controllerId = body.readUInt32BE(0);
 				const seq = body.readUInt16BE(4);
-				this.log.debug('[Cync TCP] ACK for seq=%d', seq);
+				const pendingKey = `${controllerId}:${seq}`;
+				const pending = this.pendingPowerCommands.get(pendingKey);
+				const ageMs = pending ? Date.now() - pending.sentAt : undefined;
+
+				this.log.debug(
+					'[Cync TCP] ACK frame: controller=%d controllerHex=0x%s seq=%d device=%s on=%s ageMs=%s body=%s',
+					controllerId,
+					controllerId.toString(16).padStart(8, '0'),
+					seq,
+					pending?.deviceId ?? 'unknown',
+					pending ? String(pending.on) : 'unknown',
+					ageMs !== undefined ? String(ageMs) : 'unknown',
+					formatHex(body),
+				);
+
+			} else if (type === 0x78 && body.length >= 7) {
+				const controllerId = body.readUInt32BE(0);
+				const seq = body.readUInt16BE(4);
+				const status = body[6];
+
+				const pendingKey = `${controllerId}:${seq}`;
+				const pending = this.pendingPowerCommands.get(pendingKey);
+				const ageMs = pending ? Date.now() - pending.sentAt : undefined;
+
+				this.log.warn(
+					'[Cync TCP] Possible cmd rejection frame: controller=%d controllerHex=0x%s seq=%d status=0x%s device=%s on=%s ageMs=%s body=%s packet=%s',
+					controllerId,
+					controllerId.toString(16).padStart(8, '0'),
+					seq,
+					status.toString(16).padStart(2, '0'),
+					pending?.deviceId ?? 'unknown',
+					pending ? String(pending.on) : 'unknown',
+					ageMs !== undefined ? String(ageMs) : 'unknown',
+					formatHex(body),
+					pending?.packetHex ?? 'unknown',
+				);
+
+				pending?.resolve?.(false);
+				this.pendingPowerCommands.delete(pendingKey);
+				this.handleIncomingFrame(body, type);
 			} else {
 				this.handleIncomingFrame(body, type);
 			}
@@ -1103,6 +1226,20 @@ export class TcpClient {
 					brightnessPct,
 					rgb,
 				});
+				for (const [key, pending] of this.pendingPowerCommands.entries()) {
+					if (pending.deviceId === devId && pending.on === lanParsed.on) {
+						this.preferredControllerByDevice.set(devId, pending.controllerId);
+						pending.resolve?.(true);
+						this.pendingPowerCommands.delete(key);
+
+						this.log.info(
+							'[Cync TCP] Power command confirmed: device=%s on=%s controller=0x%s',
+							devId,
+							String(lanParsed.on),
+							pending.controllerId.toString(16).padStart(8, '0'),
+						);
+					}
+				}
 
 			} else if (type === 0x83) {
 				// Fallback to legacy controller-level parsing only for 0x83

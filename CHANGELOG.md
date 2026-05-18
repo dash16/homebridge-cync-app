@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.9 — Direct Connect Bulb Support
+
+**Release Date:** 2026-05-18
+
+### Improvements
+
+- Added support for Cync device type `10` as a dimmable lightbulb
+- Added support for Cync device type `30` as a full-color lightbulb
+- Updated platform routing so device types `10` and `30` are configured as Lightbulb accessories instead of Switch accessories
+- Added catalog entries for device types `10` and `30` with appropriate default capabilities
+- Enabled brightness and color temperature support for device type `10`
+- Enabled brightness, color, and color temperature support for device type `30`
+
+### Notes
+
+- Existing cached Switch accessories for these bulbs should be automatically cleaned up and recreated as Lightbulb accessories by the platform
+
 ## v0.2.8
 
 **Release Date:** 2026-05-11

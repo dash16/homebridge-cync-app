@@ -22,6 +22,30 @@ export interface CyncDeviceModel {
  * Extend this as you discover more types.
  */
 export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
+	10: {
+		deviceType: 10,
+		modelName: 'Tunable White Smart Bulb (A19)',
+		marketingName: 'Direct Connect Smart Bulb',
+		defaultCategory: Categories.LIGHTBULB,
+		defaultCapabilities: {
+			isLight: true,
+			supportsBrightness: true,
+			supportsColor: false,
+			supportsCt: true,
+		},
+	},
+	30: {
+		deviceType: 30,
+		modelName: 'Full Color Smart Bulb (A19)',
+		marketingName: 'Direct Connect Smart Bulb',
+		defaultCategory: Categories.LIGHTBULB,
+		defaultCapabilities: {
+			isLight: true,
+			supportsBrightness: true,
+			supportsColor: false,
+			supportsCt: true,
+		},
+	},
 	46: {
 		deviceType: 46,
 		modelName: '6" Recessed Can Retrofit Fixture (Matter)',

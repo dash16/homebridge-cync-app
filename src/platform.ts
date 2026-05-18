@@ -33,6 +33,8 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 
 // Known Cync device types that should be treated as Lightbulb accessories
 const CYNC_LIGHT_DEVICE_TYPES = new Set<number>([
+	10,
+	30,
 	46,
 	48,
 	72,

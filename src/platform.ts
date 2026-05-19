@@ -32,35 +32,29 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 });
 
 // Known Cync device types that should be treated as Lightbulb accessories
-const CYNC_LIGHT_DEVICE_TYPES = new Set<number>([
-	10,
-	30,
-	46,
-	48,
-	72,
-	110,
-	123,
-	128,
-	131,
-	137,
-	142,
-	171,
+const CYNC_LIGHT_DEVICE_TYPES = new Set([
+	1, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 17, 18, 19, 20, 21,
+	22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
+	37, 47, 48, 49, 55, 56, 80, 81, 82, 83, 85, 128, 129, 130,
+	131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142,
+	143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154,
+	155, 156, 158, 159, 160, 161, 162, 163, 164, 165, 166, 169,
+	170, 171,
 ]);
 
 function isCyncLightDeviceType(deviceType: number | undefined): boolean {
-	return deviceType !== undefined && CYNC_LIGHT_DEVICE_TYPES.has(deviceType);
+	return deviceType !== undefined
+		&& CYNC_LIGHT_DEVICE_TYPES.has(deviceType);
 }
 
-
 // Known Cync device types that should be treated as Outlet accessories
-const CYNC_OUTLET_DEVICE_TYPES = new Set<number>([
-	64,
-	65,
-	172,
+const CYNC_OUTLET_DEVICE_TYPES = new Set([
+	64, 65, 66, 67, 68, 172,
 ]);
 
 function isCyncOutletDeviceType(deviceType: number | undefined): boolean {
-	return deviceType !== undefined && CYNC_OUTLET_DEVICE_TYPES.has(deviceType);
+	return deviceType !== undefined
+		&& CYNC_OUTLET_DEVICE_TYPES.has(deviceType);
 }
 
 function getDefaultCapabilitiesForDeviceType(deviceType: number | undefined): CyncCapabilityProfile {

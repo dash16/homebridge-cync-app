@@ -1335,8 +1335,19 @@ export class TcpClient {
 				const pending = this.pendingPowerCommands.get(pendingKey);
 				const ageMs = pending ? Date.now() - pending.sentAt : undefined;
 
-				this.log.warn(
-					'[Cync TCP] Possible cmd rejection frame: controller=%d controllerHex=0x%s seq=%d status=0x%s device=%s on=%s ageMs=%s body=%s packet=%s',
+				// Only treat as a rejection (warn) if the seq matches a power
+				// command we sent. The cloud also emits 0x78 ACKs for mesh-state
+				// queries, heartbeats, and other unsolicited frames — those are
+				// normal traffic and don't indicate a problem.
+				const logFn = pending ? this.log.warn : this.log.debug;
+				const label = pending
+					? 'Possible cmd rejection frame'
+					: 'ACK frame (non-command)';
+
+				logFn.call(
+					this.log,
+					'[Cync TCP] %s: controller=%d controllerHex=0x%s seq=%d status=0x%s device=%s on=%s ageMs=%s body=%s packet=%s',
+					label,
 					controllerId,
 					controllerId.toString(16).padStart(8, '0'),
 					seq,

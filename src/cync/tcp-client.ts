@@ -491,12 +491,10 @@ export class TcpClient {
 	}
 
 	private getControllerCandidates(deviceId: string, primaryControllerId: number): number[] {
-	const preferred = this.preferredControllerByDevice.get(deviceId);
 		const preferred = this.preferredControllerByDevice.get(deviceId);
 
 		let homeId = this.switchIdToHomeId.get(primaryControllerId);
 
-			if (devices.includes(deviceId)) {
 		if (!homeId) {
 			for (const [candidateHomeId, devices] of Object.entries(this.homeDevices)) {
 				if (devices.includes(deviceId)) {
@@ -528,6 +526,7 @@ export class TcpClient {
 		const candidates = [...new Set(ordered)];
 
 		this.log.debug(
+			'[Cync TCP] controller resolution: device=%s home=%s primary=0x%s preferred=%s candidates=%s knownControllers=%s',
 			deviceId,
 			homeId,
 			primaryControllerId.toString(16).padStart(8, '0'),

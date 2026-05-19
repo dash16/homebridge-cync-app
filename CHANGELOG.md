@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.3.2
+
+**Release Date:** 2026-05-19
+
+### Fixed
+- Restores proper light classification for Cync device types 46 and 123, which were unintentionally omitted during capability catalog expansion in v0.3.1.
+
+## v0.3.1 - Bluetooth Mesh Routing
+
+**Release Date:** 2026-05-19
+
+### Fixed
+- Fixed controller routing for Bluetooth-mesh bulbs bridged through a Wi-Fi mesh controller device.
+- Prevented commands from being sent with controller `0x00000000` when a valid mesh controller can be resolved from home membership.
+- Added fallback controller resolution using mesh/home device membership for BT-only bulbs that report `switchID=0`.
+- Preserved preferred-controller ordering during controller candidate selection.
+- Filtered invalid controller candidates from retry routing logic.
+
+### Improved
+- Added targeted controller-resolution debug logging to simplify future mesh/network troubleshooting.
+- Expanded device capability allowlists using mappings identified from the Home Assistant Cync integration.
+- Restored support for additional switch/downlight/light strip device types that were unintentionally omitted during the v0.3.0 capability refactor.
+
+### Thanks
+- Thanks to @falkobuttler for identifying the Bluetooth mesh routing issue, providing detailed diagnostic analysis, and contributing the initial fix proposal in #15.
+
 ## v0.3.0
 
 **Release Date:** 2026-05-18

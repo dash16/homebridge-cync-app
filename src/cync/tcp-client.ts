@@ -491,24 +491,54 @@ export class TcpClient {
 	}
 
 	private getControllerCandidates(deviceId: string, primaryControllerId: number): number[] {
-		const preferred = this.preferredControllerByDevice.get(deviceId);
-		const homeId = this.switchIdToHomeId.get(primaryControllerId);
-		if (!homeId) {
-			return [primaryControllerId];
+	const preferred = this.preferredControllerByDevice.get(deviceId);
+
+	let homeId = this.switchIdToHomeId.get(primaryControllerId);
+
+	if (!homeId) {
+		for (const [candidateHomeId, devices] of Object.entries(this.homeDevices)) {
+			if (devices.includes(deviceId)) {
+				homeId = candidateHomeId;
+				break;
+			}
 		}
-
-		const controllers = [...this.switchIdToHomeId.entries()]
-			.filter(([, candidateHomeId]) => candidateHomeId === homeId)
-			.map(([controllerId]) => controllerId);
-
-		const ordered = [
-			preferred,
-			primaryControllerId,
-			...controllers,
-		].filter((controllerId): controllerId is number => controllerId !== undefined);
-
-		return [...new Set(ordered)];
 	}
+
+	if (!homeId && primaryControllerId === 0 && this.switchIdToHomeId.size === 1) {
+		homeId = [...this.switchIdToHomeId.values()][0];
+	}
+
+	if (!homeId) {
+		return primaryControllerId > 0 ? [primaryControllerId] : [];
+	}
+
+	const controllers = [...this.switchIdToHomeId.entries()]
+		.filter(([, candidateHomeId]) => candidateHomeId === homeId)
+		.map(([controllerId]) => controllerId)
+		.filter((controllerId) => controllerId > 0);
+
+	const ordered = [
+		preferred,
+		primaryControllerId > 0 ? primaryControllerId : undefined,
+		...controllers,
+	].filter((controllerId): controllerId is number => controllerId !== undefined);
+
+	const candidates = [...new Set(ordered)];
+
+	this.log.debug(
+		'[Cync TCP] controller resolution: device=%s home=%s primary=0x%s preferred=%s candidates=%s knownControllers=%s',
+		deviceId,
+		homeId,
+		primaryControllerId.toString(16).padStart(8, '0'),
+		preferred === undefined ? 'none' : `0x${preferred.toString(16).padStart(8, '0')}`,
+		candidates.map((controllerId) => `0x${controllerId.toString(16).padStart(8, '0')}`).join(', '),
+		[...this.switchIdToHomeId.entries()]
+			.map(([controllerId, controllerHomeId]) => `0x${controllerId.toString(16).padStart(8, '0')}=>${controllerHomeId}`)
+			.join(', '),
+	);
+
+	return candidates;
+}
 	// Reliable Controller Sender: Retries LAN packets through alternate controllers until state confirmation
 	// Centralizes controller failover so power, brightness, color temperature, and RGB commands use the same resilient routing.
 	private async sendWithControllerRetry(

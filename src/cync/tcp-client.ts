@@ -492,7 +492,20 @@ export class TcpClient {
 
 	private getControllerCandidates(deviceId: string, primaryControllerId: number): number[] {
 		const preferred = this.preferredControllerByDevice.get(deviceId);
-		const homeId = this.switchIdToHomeId.get(primaryControllerId);
+		let homeId = this.switchIdToHomeId.get(primaryControllerId);
+
+		// Fall back to locating the home via this device's membership.
+		// BT-only bulbs come back from the cloud with switchID=0 and need
+		// to be routed through any Wi-Fi controller in the same mesh.
+		if (!homeId) {
+			for (const [hId, devices] of Object.entries(this.homeDevices)) {
+				if (devices.includes(deviceId)) {
+					homeId = hId;
+					break;
+				}
+			}
+		}
+
 		if (!homeId) {
 			return [primaryControllerId];
 		}

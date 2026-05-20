@@ -290,6 +290,12 @@ export class TcpClient {
 			);
 			return;
 		}
+
+		// Open the socket eagerly so the plugin receives unsolicited state
+		// broadcasts and can emit a startup state query (see requestMeshState).
+		// Previously the socket only opened on the first user-initiated SET,
+		// which left HomeKit showing stale "off" state until the user toggled.
+		await this.ensureConnected();
 	}
 
 	public applyLanTopology(topology: {
@@ -311,6 +317,18 @@ export class TcpClient {
 			Object.keys(this.homeDevices).length,
 			this.switchIdToHomeId.size,
 		);
+
+		// If the socket is already connected when topology arrives, re-fire the
+		// mesh-state query so HomeKit converges. This decouples requestMeshState
+		// from the connect()→applyLanTopology() call order: whichever lands last
+		// triggers the query, and an empty topology is a no-op (see requestMeshState).
+		if (
+			this.socket &&
+			!this.socket.destroyed &&
+			this.switchIdToHomeId.size > 0
+		) {
+			void this.requestMeshState();
+		}
 	}
 
 	private async ensureConnected(): Promise<boolean> {
@@ -426,6 +444,15 @@ export class TcpClient {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
+
+		// Brief delay so the server finishes processing the login write
+		// before we ask it to dump mesh state. Runs on every reconnect, so
+		// HomeKit resyncs after a network blip without user intervention.
+		setTimeout(() => {
+			if (!this.shuttingDown && this.socket && !this.socket.destroyed) {
+				void this.requestMeshState();
+			}
+		}, 500);
 	}
 
 	private cleanupSocket(sock: net.Socket | null): void {
@@ -742,6 +769,173 @@ export class TcpClient {
 			end,
 		]);
 	}
+	// Mesh State Query: requests a snapshot of every device's on/off, brightness, CT, and RGB
+	// from a controller. Used on each successful TCP connect so HomeKit shows the correct
+	// state without waiting for the user to toggle a light.
+	//
+	//   outer: 73 00 00 00 18                 (type=0x73, inner length=24)
+	//   inner: <ctrl:4> <seq:2>
+	//          00 7e 00 00 00 00 f8 52 06    (pipe wrapper + subtype 0x52 + payload len 6)
+	//          00 00 00 ff ff 00              (payload)
+	//          00 56 7e                       (pad + checksum 0x56 + frame terminator 0x7e)
+	private buildMeshInfoRequest(controllerId: number, seq: number): Buffer {
+		const header = Buffer.from('7300000018', 'hex');
+
+		const switchBytes = Buffer.alloc(4);
+		switchBytes.writeUInt32BE(controllerId, 0);
+
+		const seqBytes = Buffer.alloc(2);
+		seqBytes.writeUInt16BE(seq, 0);
+
+		const body = Buffer.from('007e00000000f85206000000ffff0000567e', 'hex');
+
+		return Buffer.concat([header, switchBytes, seqBytes, body]);
+	}
+
+	// Connection Warm-Up Ping: Sends 0xa3 to every controller before asking for mesh state. 
+	// The cloud appears to require this handshake — without it,
+	// the 0x52 GetStatusPaginated query is answered with a 0x7b/0x01 rejection.
+	private buildControllerPing(controllerId: number, seq: number): Buffer {
+		const header = Buffer.from('a300000007', 'hex');
+
+		const switchBytes = Buffer.alloc(4);
+		switchBytes.writeUInt32BE(controllerId, 0);
+
+		const seqBytes = Buffer.alloc(2);
+		seqBytes.writeUInt16BE(seq, 0);
+
+		const tail = Buffer.from('00', 'hex');
+
+		return Buffer.concat([header, switchBytes, seqBytes, tail]);
+	}
+
+	private async requestMeshState(): Promise<void> {
+		const socket = this.socket;
+		if (!socket || socket.destroyed) {
+			return;
+		}
+
+		// Topology may not be applied yet if connect() raced ahead of
+		// applyLanTopology(). In that case bail out — applyLanTopology() will
+		// re-fire this once it has the controller/home maps.
+		if (this.switchIdToHomeId.size === 0) {
+			this.log.debug(
+				'[Cync TCP] requestMeshState skipped: LAN topology not yet applied.',
+			);
+			return;
+		}
+
+		// Step 1: ping every known controller ~150ms apart.
+		for (const controllerId of this.switchIdToHomeId.keys()) {
+			const seq = this.nextSeq();
+			const packet = this.buildControllerPing(controllerId, seq);
+			socket.write(packet);
+
+			this.log.debug(
+				'[Cync TCP] Mesh-state warm-up ping: controller=0x%s seq=%d',
+				controllerId.toString(16).padStart(8, '0'),
+				seq,
+			);
+
+			await new Promise((resolve) => setTimeout(resolve, 150));
+		}
+
+		// Step 2: give the cloud a moment to mark the connection as active before asking
+		// for state.
+		await new Promise((resolve) => setTimeout(resolve, 500));
+
+		if (!this.socket || this.socket.destroyed) {
+			return;
+		}
+
+		// Step 3: one 0x52 query per home — the response covers all devices in that mesh.
+		const seenHomes = new Set<string>();
+		for (const [controllerId, homeId] of this.switchIdToHomeId.entries()) {
+			if (seenHomes.has(homeId)) {
+				continue;
+			}
+			seenHomes.add(homeId);
+
+			const seq = this.nextSeq();
+			const packet = this.buildMeshInfoRequest(controllerId, seq);
+			this.socket.write(packet);
+
+			this.log.info(
+				'[Cync TCP] Requested mesh state: controller=0x%s home=%s seq=%d packet=%s',
+				controllerId.toString(16).padStart(8, '0'),
+				homeId,
+				seq,
+				formatHex(packet),
+			);
+		}
+	}
+
+	// Mesh State Response Parser: decodes the paginated 0x52 response into per-device updates.
+	//
+	// Frame layout (after the outer 5-byte header has already been stripped by processIncoming):
+	//   [ctrl:4] [seq:2] 00 7e 00 00 00 00 f8 52 <innerLen> 00 00 00 00 00 00 <records...> <chk> 7e
+	// Records start at body offset 22 and are 24 bytes each. 
+	//   [0]=deviceIndex, [8]=isOn, [12]=brightness(0-100),
+	//   [16]=colorTone (0xfe means RGB mode), [20..22]=R,G,B
+	private parsePaginatedStateResponse(frame: Buffer): void {
+		if (frame.length < 51 || frame[13] !== 0x52) {
+			return;
+		}
+
+		const controllerId = frame.readUInt32BE(0);
+		const homeId = this.switchIdToHomeId.get(controllerId);
+		if (!homeId) {
+			return;
+		}
+
+		const devices = this.homeDevices[homeId];
+		if (!devices || devices.length === 0) {
+			return;
+		}
+
+		const recordsStart = 22;
+		// Trailing checksum (1 byte) + frame terminator (0x7e) sit after the records,
+		// so require strictly more than 24 bytes remaining.
+		for (let off = recordsStart; off + 24 < frame.length; off += 24) {
+			const rec = frame.subarray(off, off + 24);
+			const deviceIndex = rec[0];
+			const on = rec[8] > 0;
+			const levelByte = rec[12];
+			const colorTone = rec[16];
+
+			const deviceId = deviceIndex < devices.length ? devices[deviceIndex] : undefined;
+			if (!deviceId) {
+				continue;
+			}
+
+			const brightnessPct = on ? clampNumber(levelByte, 1, 100) : 0;
+			const rgb = colorTone === 0xfe
+				? { r: rec[20], g: rec[21], b: rec[22] }
+				: undefined;
+
+			this.log.debug(
+				'[Cync TCP] mesh state record: device=%s index=%d on=%s level=%d ct=%d rgb=%o',
+				deviceId,
+				deviceIndex,
+				String(on),
+				levelByte,
+				colorTone,
+				rgb,
+			);
+
+			if (on && brightnessPct > 0 && brightnessPct < 100) {
+				this.observedNonTrivialLevel.set(deviceId, true);
+			}
+
+			this.emitLanDeviceUpdate({
+				deviceId,
+				on,
+				brightnessPct: this.observedNonTrivialLevel.get(deviceId) ? brightnessPct : undefined,
+				rgb,
+			});
+		}
+	}
+
 	public async disconnect(): Promise<void> {
 		this.log.info('[Cync TCP] disconnect() called.');
 		this.shuttingDown = true;
@@ -1163,8 +1357,19 @@ export class TcpClient {
 				const pending = this.pendingPowerCommands.get(pendingKey);
 				const ageMs = pending ? Date.now() - pending.sentAt : undefined;
 
-				this.log.warn(
-					'[Cync TCP] Possible cmd rejection frame: controller=%d controllerHex=0x%s seq=%d status=0x%s device=%s on=%s ageMs=%s body=%s packet=%s',
+				// Only treat as a rejection (warn) if the seq matches a power
+				// command we sent. The cloud also emits 0x78 ACKs for mesh-state
+				// queries, heartbeats, and other unsolicited frames — those are
+				// normal traffic and don't indicate a problem.
+				const logFn = pending ? this.log.warn : this.log.debug;
+				const label = pending
+					? 'Possible cmd rejection frame'
+					: 'ACK frame (non-command)';
+
+				logFn.call(
+					this.log,
+					'[Cync TCP] %s: controller=%d controllerHex=0x%s seq=%d status=0x%s device=%s on=%s ageMs=%s body=%s packet=%s',
+					label,
 					controllerId,
 					controllerId.toString(16).padStart(8, '0'),
 					seq,
@@ -1225,6 +1430,18 @@ export class TcpClient {
 		}
 
 		let payload: unknown = frame;
+
+		// 0x73 or 0x83 with inner subtype 0x52 is a paginated mesh-state response
+		// (reply to the request emitted by requestMeshState on connect). The cloud
+		// returns the response as 0x83 in practice.
+		if (
+			(type === 0x73 || type === 0x83) &&
+			frame.length >= 14 &&
+			frame[13] === 0x52
+		) {
+			this.parsePaginatedStateResponse(frame);
+			return;
+		}
 
 		if (type === 0x73 || type === 0x83) {
 			const lanParsed = this.parseLanSwitchUpdate(frame);

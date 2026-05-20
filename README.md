@@ -12,88 +12,147 @@
 ![typescript](https://img.shields.io/badge/language-typescript-3178c6)
 
 
-Homebridge plugin that integrates your GE Cync account (via the Cync app/API) and exposes all supported devices: plugs, lights, switches, etc.
+# homebridge-cync-app
 
-It currently supports:
+Homebridge plugin for integrating GE Cync devices with Apple HomeKit.
 
-- Email + password + 2FA (one-time code) login
-- Persistent token storage in the Homebridge storage path
-- Discovery of Cync “meshes” and devices from the cloud
-- Cync plugs exposed as HomeKit switches/outlets.
-- **Cync lights** exposed as HomeKit lightbulbs with:
-  - On/Off, dimming (Brightness), and color (Hue/Saturation) over LAN.
-- Accessory Information populated from your Cync account (manufacturer, model, serial, firmware).
-- Automatic token refresh to keep your Cync session alive without re-entering codes.
-- Periodic accessory polling so Homebridge stays in sync with the Cync app.
-> Status: **Early LAN preview.** Tested with Cync smart plugs and downlights. Other device types may not appear or may behave incorrectly.
+This plugin connects to your Cync account, discovers supported devices automatically, and exposes them to HomeKit through Homebridge. Where supported, communication is performed locally over LAN for improved responsiveness and reliability.
+
+---
+
+## Features
+
+- HomeKit support for GE Cync devices
+- Automatic device discovery
+- Support for lights, dimmers, switches, outlets, and light strips
+- Brightness support
+- Color temperature support
+- RGB color support where available
+- LAN-based device communication
+- Child bridge compatible
+- Homebridge UI configuration support
+- Debug logging support for troubleshooting
+
+---
+
+## Supported Devices
+
+The plugin currently supports many common Cync device families, including:
+
+- White bulbs
+- Tunable white bulbs
+- Full-color bulbs
+- Light strips
+- Smart plugs / outlets
+- Smart switches
+- Dimmers
+
+New device types can often be supported quickly once identified.
+
+If a device appears incorrectly in HomeKit or is missing functionality, please open an issue with:
+- The device type
+- A screenshot or product link from the Cync app
+- Debug logs
+
+---
+
+## Requirements
+
+- Node.js 20 or newer
+- Homebridge v1.8.0 or newer
+- A GE Cync account
+- At least one compatible Cync Wi-Fi device on the network
+
+---
 
 ## Installation
 
-1. Install via Homebridge UI (Plugins tab) or from the command line:
+Install through the Homebridge UI or manually with npm:
 
+```bash
+npm install -g homebridge-cync-app
 ```
-	npm install -g homebridge-cync-app
-```
-2. Restart Homebridge.
 
-## Upgrade Notes
+After installation:
 
-### v0.2.0 (Authentication & CT Support)
+1. Open the Homebridge UI
+2. Add and configure the plugin
+3. Enter your Cync account email
+4. Complete the login flow using the one-time verification code sent by Cync
+5. Restart Homebridge
 
-This release adds automatic token refresh and Color Temperature (CT) support.
+Devices should appear automatically after startup.
 
-**One-time action required when upgrading from v0.1.x:**
-- You must **sign out and sign back in** (or delete the stored token) once after upgrading.
-- This allows the plugin to obtain a token that includes refresh credentials.
+Tokens are cached locally to reduce repeated login prompts.
 
-After this one-time re-auth:
-- Access tokens will refresh automatically before expiry.
-- Manual re-login should be much less frequent.
 
-**Color Temperature (CT):**
-- CT controls are exposed in Home.app only for devices that report CT capability.
-- Devices without CT support will not show a Color Temperature control (expected behavior).
+---
 
-## Configuration
+## Device Notes
 
-Add a platform entry to your Homebridge `config.json`:
+### Color and Color Temperature
 
-```
-{
-  "platforms": [
-    {
-      "platform": "CyncAppPlatform",
-      "name": "Cync App (Dev)",
-      "username": "you@example.com",
-      "password": "your-cync-password",
-      "twoFactor": "123456"
-    }
-  ]
-}
-```
-## Cync Login / 2FA Flow
+Some Cync devices expose both RGB color and color temperature controls. HomeKit may present these differently depending on the accessory category and Home app behavior.
 
-1. Open the plugin settings in Homebridge UI.
-2. Enter your Cync **Email** and **Password**.
-3. Click **Request Verification Code**.
-4. Check your email for the 6-digit Cync verification code.
-5. Enter the code in **Verification Code (OTP)**.
-6. Click the Homebridge **Save** button.
-7. Restart Homebridge.
+### Outlets and Switches
 
-On successful login, a token will be stored in `cync-tokens.json` under the Homebridge storage path.
-While a valid token exists, the login fields are locked. Click **Sign Out** in the plugin UI to clear the token and re-enter credentials.
+Certain Cync device types are exposed as outlets instead of generic switches to improve HomeKit behavior and Siri integration.
 
-## Project Status & Roadmap
-- **0.0.1** – Initial scaffold, basic Homebridge platform, config wiring, and logging.
-- **0.0.2** - Cync cloud login and device list discovery.
-  - ✅ 2FA cloud login and token persistence
-  - ✅ Cloud discovery of meshes and outlets
-  - ✅ Basic HomeKit switch accessories with real Cync names
-- **0.1.0** – Individual accessories for plugs; per-device control.  Switches, sensors and lights have not yet been tested and may not work.
-- HomeKit can now control Cync smart plugs directly over the Cync LAN bridge.
-- Switch states update independently and stay in sync between the Cync app and HomeKit.
-- Cloud config is still used for login + topology, but ongoing control is via TCP.
-- **0.1.1 - 0.1.3** - Failed experiment to incorporate custom UI.
-- **0.1.4** - Codebase restored to v0.1.0
-- **0.1.5** - Successful Custom UI implementation, improved 2FA login flow.
+### LAN Communication
+
+The plugin attempts to communicate with supported devices locally over the network for improved responsiveness compared to cloud-only control.
+
+---
+
+## Troubleshooting
+
+### Device not responding
+
+1. Confirm the device still responds in the official Cync app
+2. Restart Homebridge
+3. Enable debug logging
+4. Check Homebridge logs for TCP or authentication errors
+5. Power cycle the affected device if needed
+
+### Missing devices
+
+If a device is not discovered:
+
+1. Verify it appears in the Cync app
+2. Restart Homebridge
+3. Enable debug logging
+4. Open an issue with:
+   - Device type
+   - Product screenshot or link
+   - Relevant logs
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+When reporting bugs, please include:
+- Homebridge version
+- Node.js version
+- Device type(s)
+- Relevant logs
+- Steps to reproduce
+
+---
+
+## Credits
+
+This project builds on community research and prior work surrounding the GE Cync ecosystem.
+
+Special thanks to:
+
+- [Homebridge](https://homebridge.io)
+- [nikshriv/cync_lights](https://github.com/nikshriv/cync_lights) for extensive device support research and protocol implementation reference work
+- The Homebridge community and contributors
+
+---
+
+## Disclaimer
+
+This project is not affiliated with or endorsed by GE Lighting or Savant.
+
+HomeKit is a trademark of Apple Inc.

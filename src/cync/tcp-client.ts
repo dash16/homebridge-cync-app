@@ -317,6 +317,18 @@ export class TcpClient {
 			Object.keys(this.homeDevices).length,
 			this.switchIdToHomeId.size,
 		);
+
+		// If the socket is already connected when topology arrives, re-fire the
+		// mesh-state query so HomeKit converges. This decouples requestMeshState
+		// from the connect()→applyLanTopology() call order: whichever lands last
+		// triggers the query, and an empty topology is a no-op (see requestMeshState).
+		if (
+			this.socket &&
+			!this.socket.destroyed &&
+			this.switchIdToHomeId.size > 0
+		) {
+			void this.requestMeshState();
+		}
 	}
 
 	private async ensureConnected(): Promise<boolean> {
@@ -800,6 +812,16 @@ export class TcpClient {
 	private async requestMeshState(): Promise<void> {
 		const socket = this.socket;
 		if (!socket || socket.destroyed) {
+			return;
+		}
+
+		// Topology may not be applied yet if connect() raced ahead of
+		// applyLanTopology(). In that case bail out — applyLanTopology() will
+		// re-fire this once it has the controller/home maps.
+		if (this.switchIdToHomeId.size === 0) {
+			this.log.debug(
+				'[Cync TCP] requestMeshState skipped: LAN topology not yet applied.',
+			);
 			return;
 		}
 

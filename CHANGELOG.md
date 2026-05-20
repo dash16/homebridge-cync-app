@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.3
+
+### Fixed
+- Improved LAN startup state sync by querying Cync mesh state after TCP login and after LAN topology is available.
+- Fixed HomeKit accessories sometimes showing stale startup state until manually toggled.
+- Added mesh-state parsing for paginated status responses so on/off, brightness, color temperature, and RGB state can refresh through the existing LAN update path.
+- Reduced noisy non-command `0x78` TCP ACK warnings by logging routine ACKs at debug level instead.
+- Added preventative TCP recovery behavior
+
+### Thanks
+- Thanks to @falkobuttler for the pull request to add these features!
+
 ## v0.3.2
 
 **Release Date:** 2026-05-19

@@ -55,6 +55,24 @@ export type LanDeviceUpdateListener = (update: LanDeviceUpdate) => void;
 export class TcpClient {
 	private transportMode: TransportMode | null = null;
 
+	private resetCommandSessionState(reason: string): void {
+		const pendingCount = this.pendingPowerCommands.size;
+
+		for (const pending of this.pendingPowerCommands.values()) {
+			pending.resolve?.(false);
+		}
+
+		this.pendingPowerCommands.clear();
+		this.seq = 0;
+		this.readBuffer = Buffer.alloc(0);
+
+		this.log.debug(
+			'[Cync TCP] Reset command session state (%s): clearedPending=%d seq=0',
+			reason,
+			pendingCount,
+		);
+	}
+
 	public registerSwitchMapping(controllerId: number, deviceId: string): void {
 		if (!Number.isFinite(controllerId)) {
 			return;
@@ -392,6 +410,8 @@ export class TcpClient {
 		const portTCP = 23778;
 
 		this.log.info('[Cync TCP] Connecting to %s…', host);
+
+		this.resetCommandSessionState('establishSocket');
 
 		let socket: net.Socket | null = null;
 		if (this.socket) {
@@ -939,6 +959,7 @@ export class TcpClient {
 	public async disconnect(): Promise<void> {
 		this.log.info('[Cync TCP] disconnect() called.');
 		this.shuttingDown = true;
+		this.resetCommandSessionState('establishSocket');
 
 		if (this.reconnectTimer) {
 			clearTimeout(this.reconnectTimer);
@@ -1285,6 +1306,7 @@ export class TcpClient {
 
 		socket.on('close', () => {
 			this.log.warn('[Cync TCP] Socket closed.');
+			this.resetCommandSessionState('establishSocket');
 
 			if (this.heartbeatTimer) {
 				clearInterval(this.heartbeatTimer);

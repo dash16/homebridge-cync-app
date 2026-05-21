@@ -702,8 +702,17 @@ export class CyncClient {
 							meshIndex = (mod % 1000) + Math.floor(mod / 1000) * 256;
 						}
 
-						// Controller ID used by LAN packets (HA's switch_controller)
-						const switchController = d.switchID as number | undefined;
+						// Controller ID used by LAN packets (HA's switch_controller).
+						// The Cync REST API may return switchID as a composite value that
+						// encodes a device index in the trailing 3 digits
+						// (e.g. 1850364131001 → controller 1850364131, index 001).
+						// The TCP protocol encodes controller IDs as 4-byte unsigned integers,
+						// so strip the suffix when the raw value exceeds uint32 range.
+						const rawSwitchId = d.switchID as number | undefined;
+						const switchController =
+							rawSwitchId !== undefined && rawSwitchId > 0xffffffff
+								? Math.floor(rawSwitchId / 1000)
+								: rawSwitchId;
 
 						// Use deviceID first, then wifiMac (stripped), then a mesh-based fallback.
 						const id =

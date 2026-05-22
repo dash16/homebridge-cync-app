@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.4 — Composite Switch ID Crash Fix
+
+**Release Date:** 2026-05-22
+
+### Fixed
+- Fixed a crash affecting some Cync mesh/controller devices where large composite switchID values exceeded the uint32 range expected by LAN packet builders.
+- Added support for preserving the original API-provided switchID while deriving a LAN-safe controller identifier for mesh state requests and topology handling.
+- Added defensive validation around composite switch ID parsing using Number.isSafeInteger() to harden against malformed or unexpected API values.
+
+### Acknowledgements
+- Thanks to @vhvhxksc4t-sudo for identifying the composite switchID pattern, and submitting the initial fix in PR #17.
+- Additional hardening and validation improvements were applied during merge review to preserve raw API identifiers while safely handling LAN controller IDs.
+
 ## v0.3.3
 
 ### Fixed

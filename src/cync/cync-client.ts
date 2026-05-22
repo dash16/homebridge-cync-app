@@ -708,9 +708,14 @@ export class CyncClient {
 						// rawSwitchId is preserved for accessory identity, API correlation, and logs.
 						// controllerId is the uint32 value used for LAN packet writes (writeUInt32BE).
 						const rawSwitchId = d.switchID as number | undefined;
-						const isComposite = rawSwitchId !== undefined && rawSwitchId > 0xffffffff;
-						const controllerId = isComposite ? Math.floor(rawSwitchId! / 1000) : rawSwitchId;
-						const switchIndex = isComposite ? rawSwitchId! % 1000 : undefined;
+						const isValidSwitchId = rawSwitchId !== undefined && Number.isSafeInteger(rawSwitchId);
+						const isComposite = isValidSwitchId && rawSwitchId > 0xffffffff;
+						const controllerId = isValidSwitchId
+							? isComposite
+								? Math.floor(rawSwitchId / 1000)
+								: rawSwitchId
+							: undefined;
+						const switchIndex = isComposite ? rawSwitchId % 1000 : undefined;
 
 						// Use deviceID first, then wifiMac (stripped), then a mesh-based fallback.
 						const id =

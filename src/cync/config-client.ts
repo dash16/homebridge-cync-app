@@ -85,7 +85,12 @@ export interface CyncDevice {
 	mac?: string;
 	sn?: string;
 	switch_id?: string;
+	/** uint32 LAN controller ID, derived from raw_switch_id when the REST API returns a composite value */
 	switch_controller?: number | string;
+	/** Original switchID from the Cync REST API — may be a composite value encoding a device index */
+	raw_switch_id?: number;
+	/** Trailing device index encoded in raw_switch_id when it exceeds uint32 range (e.g. 1850364131001 → 1) */
+	switch_index?: number;
 	mesh_id?: number | string;
 
 	[key: string]: unknown;

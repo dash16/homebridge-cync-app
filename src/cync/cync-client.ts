@@ -702,17 +702,15 @@ export class CyncClient {
 							meshIndex = (mod % 1000) + Math.floor(mod / 1000) * 256;
 						}
 
-						// Controller ID used by LAN packets (HA's switch_controller).
 						// The Cync REST API may return switchID as a composite value that
 						// encodes a device index in the trailing 3 digits
-						// (e.g. 1850364131001 → controller 1850364131, index 001).
-						// The TCP protocol encodes controller IDs as 4-byte unsigned integers,
-						// so strip the suffix when the raw value exceeds uint32 range.
+						// (e.g. 1850364131001 → controller 1850364131, index 1).
+						// rawSwitchId is preserved for accessory identity, API correlation, and logs.
+						// controllerId is the uint32 value used for LAN packet writes (writeUInt32BE).
 						const rawSwitchId = d.switchID as number | undefined;
-						const switchController =
-							rawSwitchId !== undefined && rawSwitchId > 0xffffffff
-								? Math.floor(rawSwitchId / 1000)
-								: rawSwitchId;
+						const isComposite = rawSwitchId !== undefined && rawSwitchId > 0xffffffff;
+						const controllerId = isComposite ? Math.floor(rawSwitchId! / 1000) : rawSwitchId;
+						const switchIndex = isComposite ? rawSwitchId! % 1000 : undefined;
 
 						// Use deviceID first, then wifiMac (stripped), then a mesh-based fallback.
 						const id =
@@ -728,13 +726,13 @@ export class CyncClient {
 							homeDevices[meshIndex] = deviceIdStr;
 						}
 
-						// Mirror HA's switchID_to_homeID + home_controllers
-						if (switchController !== undefined && Number.isFinite(switchController) && switchController > 0) {
-							if (!this.switchIdToHomeId[switchController]) {
-								this.switchIdToHomeId[switchController] = homeId;
+						// Mirror HA's switchID_to_homeID + home_controllers (keyed by uint32 controllerId)
+						if (controllerId !== undefined && Number.isFinite(controllerId) && controllerId > 0) {
+							if (!this.switchIdToHomeId[controllerId]) {
+								this.switchIdToHomeId[controllerId] = homeId;
 							}
-							if (!homeControllers.includes(switchController)) {
-								homeControllers.push(switchController);
+							if (!homeControllers.includes(controllerId)) {
+								homeControllers.push(controllerId);
 							}
 						}
 
@@ -745,7 +743,9 @@ export class CyncClient {
 							device_id: deviceIdStr,
 							mac: wifiMac,
 							mesh_id: meshIndex,
-							switch_controller: switchController,
+							switch_controller: controllerId,
+							raw_switch_id: rawSwitchId,
+							...(switchIndex !== undefined && { switch_index: switchIndex }),
 							raw: d,
 						});
 					}

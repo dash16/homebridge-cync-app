@@ -43,24 +43,27 @@ https://www.gelighting.com/smart-home/led-bulbs/soft-white
 
 ## 2. Discovery Logs (Required)
 
-Please enable **Homebridge Debug Mode** (`-D` or toggle in the UI), restart Homebridge, and paste the **full debug block for this device**.
+Please enable **Homebridge Debug Mode**, restart Homebridge, and paste the startup discovery logs for the affected device.
 
-Look for log lines like:
+Look for lines like:
 
-```
-
-[Cync App] Fetched device: {
-deviceId: …,
-productId: …,
-model: …,
-capabilities: …,
-raw: …
+```text
+[Cync] CyncClient: loading Cync cloud configuration…
+[Cync] Fetching Cync devices from https://api.gelighting.com/...
+[Cync] Cync devices payload: top-level array length=...
+[Cync] CyncClient: probing properties for mesh ... (id=..., product_id=...)
+[Cync] CyncClient: mesh ... properties keys=...
+[Cync] CyncClient: mesh ... bulbsArray length=...
+[Cync] CyncClient: bulb #... for mesh ... → {
+  displayName: ...
+  deviceID: ...
+  deviceType: ...
+  raw: { ... }
 }
-
 ```
 
-Paste them here (you may redact serial numbers if desired):
-
+Please include the full bulb #... block for the affected device.
+You may redact Wi-Fi names, MAC addresses, and tokens.
 ```
 
 <insert logs>
@@ -68,7 +71,7 @@ Paste them here (you may redact serial numbers if desired):
 
 ---
 
-## 3. Cloud `/property` Responses
+## 3. Device Action Logs
 
 To understand how the device reports state, please:
 

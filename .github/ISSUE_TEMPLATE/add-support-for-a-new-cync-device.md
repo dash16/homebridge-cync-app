@@ -71,54 +71,7 @@ You may redact Wi-Fi names, MAC addresses, and tokens.
 
 ---
 
-## 3. Device Action Logs
-
-To understand how the device reports state, please:
-
-1. Turn the device **on**
-2. Turn it **off**
-3. Adjust **brightness** or **color** in the **Cync app**
-
-Then copy any log lines showing cloud property responses such as:
-
-```
-[Cync App] [cloud] GET /product/.../device/.../property → …
-```
-
-Paste them here:
-
-```
-<insert logs>
-```
-
----
-
-## 4. LAN / TCP Logs (If Available)
-
-Some Cync devices support **LAN/TCP communication** for faster updates.
-
-If you see logs like `[Cync TCP] Connecting…`, please include examples such as:
-
-```
-[Cync TCP][recv] …
-[Cync TCP][send] …
-```
-
-Paste them here:
-
-```
-<insert logs>
-```
-
-If your device does **not** show TCP logs, say so:
-
-```
-No TCP messages observed.
-```
-
----
-
-## 5. Screenshots from the **Cync App**
+## 3. Screenshots from the **Cync App**
 
 Please attach screenshots **from the Cync mobile app (not Apple Home)** showing:
 
@@ -130,7 +83,7 @@ These help determine which capabilities the device supports.
 
 ---
 
-## 6. Anything Else?
+## 4. Anything Else?
 
 If the device behaves in an unusual way (multiple endpoints, segmented lights, unusual controls, etc.), please describe it here.
 

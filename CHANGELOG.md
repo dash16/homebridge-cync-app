@@ -1,5 +1,37 @@
 # Changelog
 
+# v0.4.0 — Capability Classifier & Fan Support
+
+**Release Date:** 2026-05-27
+
+## Added
+- Added support for Cync fan switch devices (deviceType 81) using HomeKit `Fanv2`
+- Added dedicated `cync-fan-accessory.ts` accessory handler
+- Added centralized `device-classifier.ts` subsystem for accessory classification
+- Added classification debug logging showing:
+  - device name
+  - device ID
+  - resolved device type
+  - detected capabilities
+  - selected accessory type
+  - classification reason
+- Added unsupported device fallback logging to improve future device onboarding
+
+## Changed
+- Refactored accessory selection to use capability-aware classification instead of relying solely on static device type lists
+- Improved separation of concerns by moving classification logic out of `platform.ts`
+- Expanded known Cync device catalogs using data cross-referenced from the Home Assistant Cync integration
+
+## Fixed
+- Fixed fan switches incorrectly appearing as Lightbulb accessories in HomeKit
+- Restored proper handling for several light and outlet device types after classifier integration
+- Improved accessory fallback behavior for unknown or partially supported devices
+
+## Developer Notes
+- Classification decisions are now centralized in `src/cync/device-classifier.ts`
+- Future device onboarding should require significantly less modification to `platform.ts`
+- New debug logs should make community issue reports substantially easier to triage
+
 ## 0.3.4 — Composite Switch ID Crash Fix
 
 **Release Date:** 2026-05-22

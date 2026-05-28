@@ -23,6 +23,8 @@ import {
 import { configureCyncLightAccessory } from './cync/cync-light-accessory.js';
 import { configureCyncSwitchAccessory } from './cync/cync-switch-accessory.js';
 import { configureCyncOutletAccessory } from './cync/cync-outlet-accessory.js';
+import { configureCyncFanAccessory } from './cync/cync-fan-accessory.js';
+import { classifyCyncDevice } from './cync/device-classifier.js';
 
 const toCyncLogger = (log: Logger): CyncLogger => ({
 	debug: log.debug.bind(log),
@@ -31,37 +33,9 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 	error: log.error.bind(log),
 });
 
-// Known Cync device types that should be treated as Lightbulb accessories
-const CYNC_LIGHT_DEVICE_TYPES = new Set([
-	1, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 17, 18, 19, 20, 21,
-	22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
-	37, 46, 47, 48, 49, 55, 56, 80, 81, 82, 83, 85, 123, 128, 129, 130,
-	131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142,
-	143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154,
-	155, 156, 158, 159, 160, 161, 162, 163, 164, 165, 166, 169,
-	170, 171,
-]);
+function getDefaultCapabilitiesForDeviceType(): CyncCapabilityProfile {
+	const isLight = false;
 
-function isCyncLightDeviceType(deviceType: number | undefined): boolean {
-	return deviceType !== undefined
-		&& CYNC_LIGHT_DEVICE_TYPES.has(deviceType);
-}
-
-// Known Cync device types that should be treated as Outlet accessories
-const CYNC_OUTLET_DEVICE_TYPES = new Set([
-	64, 65, 66, 67, 68, 172,
-]);
-
-function isCyncOutletDeviceType(deviceType: number | undefined): boolean {
-	return deviceType !== undefined
-		&& CYNC_OUTLET_DEVICE_TYPES.has(deviceType);
-}
-
-function getDefaultCapabilitiesForDeviceType(deviceType: number | undefined): CyncCapabilityProfile {
-	const isLight = isCyncLightDeviceType(deviceType);
-
-	// Conservative defaults: only claim what you can prove.
-	// We'll promote color/brightness once LAN proves it.
 	return {
 		isLight,
 		supportsBrightness: false,
@@ -163,13 +137,14 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		const Characteristic = this.api.hap.Characteristic;
 
 		const lightService = accessory.getService(Service.Lightbulb);
+		const fanService = accessory.getService(Service.Fanv2);
 		const outletService = accessory.getService(Service.Outlet);
 		const switchService = accessory.getService(Service.Switch);
-		const primaryService = lightService || outletService || switchService;
+		const primaryService = lightService || fanService || outletService || switchService;
 
 		if (!primaryService) {
 			this.log.debug(
-				'Cync: accessory %s has no Lightbulb, Outlet, or Switch service for deviceId=%s',
+				'Cync: accessory %s has no Lightbulb, Fan, Outlet, or Switch service for deviceId=%s',
 				accessory.displayName,
 				update.deviceId,
 			);
@@ -180,7 +155,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		const ctx = accessory.context as CyncAccessoryContext;
 		ctx.cync = ctx.cync ?? { meshId: '', deviceId: update.deviceId };
 		if (!ctx.cync.capabilities) {
-			ctx.cync.capabilities = getDefaultCapabilitiesForDeviceType(ctx.cync.deviceType);
+			ctx.cync.capabilities = getDefaultCapabilitiesForDeviceType();
 		}
 		const promoted = promoteCapabilitiesFromLan(ctx.cync.capabilities, update);
 		if (promoted) {
@@ -203,9 +178,33 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				update.deviceId,
 			);
 
-			primaryService.updateCharacteristic(Characteristic.On, update.on);
+			if (lightService || outletService || switchService) {
+				primaryService.updateCharacteristic(Characteristic.On, update.on);
+			}
 			if (outletService && outletService.testCharacteristic(Characteristic.OutletInUse)) {
 				outletService.updateCharacteristic(Characteristic.OutletInUse, update.on);
+			}
+			if (fanService && fanService.testCharacteristic(Characteristic.Active)) {
+				fanService.updateCharacteristic(
+					Characteristic.Active,
+					update.on ? Characteristic.Active.ACTIVE : Characteristic.Active.INACTIVE,
+				);
+			}
+		}
+		// ---- Fan Speed ----
+		if (fanService) {
+			let speedPct: number | undefined;
+
+			if (typeof update.brightnessPct === 'number' && Number.isFinite(update.brightnessPct)) {
+				speedPct = Math.max(0, Math.min(100, Math.round(update.brightnessPct)));
+			}
+
+			if (speedPct !== undefined) {
+				ctx.cync.brightness = speedPct;
+
+				if (fanService.testCharacteristic(Characteristic.RotationSpeed)) {
+					fanService.updateCharacteristic(Characteristic.RotationSpeed, speedPct);
+				}
 			}
 		}
 
@@ -465,10 +464,36 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				this.deviceIdToAccessory.set(deviceId, accessory);
 
 				const deviceType = resolveDeviceType(device);
+				const classification = classifyCyncDevice(device, deviceType);
+
+				this.log.debug(
+					'Cync device classification: ' +
+					`name="${deviceName}" ` +
+					`deviceId=${deviceId} ` +
+					`deviceType=${classification.deviceType ?? 'unknown'} ` +
+					`capabilities=${classification.capabilities.join(',') || 'none'} ` +
+					`accessoryType=${classification.accessoryType} ` +
+					`reason="${classification.reason}"`,
+				);
 				const deviceTypeStr =
 					typeof deviceType === 'number' ? String(deviceType) : 'unknown';
 
-				if (isCyncLightDeviceType(deviceType)) {
+				if (classification.accessoryType === 'fan') {
+					this.log.info(
+						'Cync: configuring %s as Fan (deviceType=%s, deviceId=%s)',
+						deviceName,
+						deviceTypeStr,
+						deviceId,
+					);
+					configureCyncFanAccessory(
+						this.accessoryEnv,
+						mesh,
+						device,
+						accessory,
+						deviceName,
+						deviceId,
+					);
+				} else if (classification.accessoryType === 'light') {
 					this.log.info(
 						'Cync: configuring %s as Lightbulb (deviceType=%s, deviceId=%s)',
 						deviceName,
@@ -483,7 +508,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						deviceName,
 						deviceId,
 					);
-				} else if (isCyncOutletDeviceType(deviceType)) {
+				} else if (classification.accessoryType === 'outlet') {
 					this.log.info(
 						'Cync: configuring %s as Outlet (deviceType=%s, deviceId=%s)',
 						deviceName,
@@ -491,6 +516,21 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						deviceId,
 					);
 					configureCyncOutletAccessory(
+						this.accessoryEnv,
+						mesh,
+						device,
+						accessory,
+						deviceName,
+						deviceId,
+					);
+				} else if (classification.accessoryType === 'unsupported') {
+					this.log.warn(
+						'Cync: unsupported device %s (deviceType=%s, deviceId=%s); configuring as Switch fallback',
+						deviceName,
+						deviceTypeStr,
+						deviceId,
+					);
+					configureCyncSwitchAccessory(
 						this.accessoryEnv,
 						mesh,
 						device,

@@ -1,7 +1,7 @@
 ---
-name: Add Support for a New Cync Device
-about: Request adding support for a Cync device
-title: Add Cync Device [MODEL]
+name: Unsupported or Incorrectly Detected Cync Device
+about: Accessory is detected, but has the wrong type or missing features
+title: 'Cync Device Issue: [MODEL]'
 labels: enhancement
 assignees: dash16
 
@@ -9,7 +9,7 @@ assignees: dash16
 
 Thank you for helping expand device support in **homebridge-cync-app**.
 
-To add support for a new device model, I need diagnostic information from your plugin installation and the Cync app.
+To improve compatibility for an incorrectly identified/unidentified Cync device, I need diagnostic information from your plugin installation and the Cync app.
 
 Please fill out all sections below.
 

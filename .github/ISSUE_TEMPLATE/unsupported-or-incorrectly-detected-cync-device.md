@@ -90,7 +90,7 @@ These help determine which capabilities the device supports.
 
 ---
 
-## Thank You
 <!--
+Thank You!
 Once you submit this, I’ll analyze the device capabilities, determine the correct HomeKit service type, and add support to the plugin.
 -->

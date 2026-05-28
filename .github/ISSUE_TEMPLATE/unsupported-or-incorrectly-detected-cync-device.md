@@ -7,43 +7,40 @@ assignees: dash16
 
 ---
 
-Thank you for helping expand device support in **homebridge-cync-app**.
+<!--Thank you for helping expand device support in **homebridge-cync-app**.
 
 To improve compatibility for an incorrectly identified/unidentified Cync device, I need diagnostic information from your plugin installation and the Cync app.
 
-Please fill out all sections below.
-
+Please replace the placeholders below with your information.
+You can delete these instruction comments before submitting.
+-->
 ---
 
 ## 1. Device Information
 
 **1.1 Product name as shown in the Cync app**
 
-(e.g., “6" Recessed Can Retrofit Fixture (Matter)”, “Indoor Smart Plug (3-in-1)”, “Indoor Smart Plug”)
-
+<!--e.g., “6" Recessed Can Retrofit Fixture (Matter)”, “Indoor Smart Plug (3-in-1)”, “Indoor Smart Plug”-->
+```
+<insert product name>
+```
 **1.2 Product page URL (GE/Cync or retailer)**
 
-Link to the product page if available.
-
-Example:  
-https://www.gelighting.com/smart-home/led-bulbs/soft-white
-
+<!-- Paste a GE/Cync or retailer product link, if available. -->
+```
+<insert URL>
+```
 **1.3 What kind of device is this?**
 
-* Plug (on/off only)
-* Dimmer
-* Tunable white
-* Full color light
-* Multi-zone light
-* Switch
-* Downlight
-* Other (describe)
-
+<!-- Example: plug, dimmer, tunable white light, full color light, fan, switch, sensor, other. -->
+```
+<insert device type>
+```
 ---
 
 ## 2. Discovery Logs (Required)
 
-Please enable **Homebridge Debug Mode**, restart Homebridge, and paste the startup discovery logs for the affected device.
+<!--Please enable **Homebridge Debug Mode**, restart Homebridge, and paste the startup discovery logs for the affected device.
 
 Look for lines like:
 
@@ -64,8 +61,8 @@ Look for lines like:
 
 Please include the full bulb #... block for the affected device.
 You may redact Wi-Fi names, MAC addresses, and tokens.
+-->
 ```
-
 <insert logs>
 ```
 
@@ -73,20 +70,20 @@ You may redact Wi-Fi names, MAC addresses, and tokens.
 
 ## 3. Screenshots from the **Cync App**
 
-Please attach screenshots **from the Cync mobile app (not Apple Home)** showing:
+<!--Please attach screenshots **from the Cync mobile app (not Apple Home)** showing:
 
 * The **device settings page**
 * The **main control UI** (brightness / color / mode controls)
 * Any **advanced settings** available
 
 These help determine which capabilities the device supports.
-
+-->
 ---
 
 ## 4. Anything Else?
 
-If the device behaves in an unusual way (multiple endpoints, segmented lights, unusual controls, etc.), please describe it here.
-
+<!--If the device behaves in an unusual way (multiple endpoints, segmented lights, unusual controls, etc.), please describe it here.
+-->
 ```
 <notes>
 ```
@@ -94,5 +91,6 @@ If the device behaves in an unusual way (multiple endpoints, segmented lights, u
 ---
 
 ## Thank You
-
+<!--
 Once you submit this, I’ll analyze the device capabilities, determine the correct HomeKit service type, and add support to the plugin.
+-->

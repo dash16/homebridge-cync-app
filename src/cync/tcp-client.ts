@@ -86,7 +86,6 @@ export class TcpClient {
 	private readonly log: CyncLogger;
 	private loginCode: Uint8Array | null = null;
 	private config: CyncCloudConfig | null = null;
-	private meshSockets = new Map<string, net.Socket>();
 	private deviceUpdateCb: DeviceUpdateCallback | null = null;
 	private roomUpdateCb: DeviceUpdateCallback | null = null;
 	private motionUpdateCb: DeviceUpdateCallback | null = null;
@@ -101,7 +100,6 @@ export class TcpClient {
 	private reconnectAttempt = 0;
 	private connectInFlight: Promise<void> | null = null;
 	private shuttingDown = false;
-	private deviceBrightnessEncoding = new Map<string, 'pct100' | 'lvl254'>();
 	private readonly lanDeviceUpdateListeners: LanDeviceUpdateListener[] = [];
 	private observedNonTrivialLevel = new Map<string, boolean>();
 	private pendingPowerCommands = new Map<string, {
@@ -1412,29 +1410,6 @@ export class TcpClient {
 
 			this.readBuffer = this.readBuffer.subarray(total);
 		}
-	}
-
-	private async sendRawCommand(
-		deviceId: string,
-		command: string,
-		params: Record<string, unknown>,
-	): Promise<void> {
-		if (!this.config || !this.loginCode) {
-			this.log.warn(
-				'TcpClient.sendRawCommand() called before connect(); deviceId=%s command=%s params=%o',
-				deviceId,
-				command,
-				params,
-			);
-			return;
-		}
-
-		this.log.info(
-			'TcpClient.sendRawCommand() stub: deviceId=%s command=%s params=%o',
-			deviceId,
-			command,
-			params,
-		);
 	}
 
 	// Incoming Frame Handler: routes LAN messages to raw + parsed callbacks

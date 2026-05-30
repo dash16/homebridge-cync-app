@@ -828,7 +828,7 @@ export class CyncClient {
 
 		// REQUIRED: subscribe to parsed device updates
 		this.tcpClient.onDeviceUpdate((update) => {
-			this.log.info('[Cync TCP] device update callback fired; payload=%o', update);
+			this.log.debug('[Cync TCP] device update callback fired; payload=%o', update);
 		});
 
 		await this.tcpClient.connect(loginCode, config);

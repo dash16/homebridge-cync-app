@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.1 — Maintenance Sweep
+
+**Release Date:** 2026-05-29
+
+### Changed
+- Reduced routine LAN device update logging from **info** to **debug**.
+- Kept device classification behavior centralized in `device-classifier.ts` while simplifying catalog metadata to descriptive model information.
+
+### Fixed
+- Removed unused accessory scaffolding, TCP helper state, LAN update bridge code, and obsolete catalog classification metadata.
+- Corrected package lockfile version metadata to match the published package version.
+
+### Notes
+- No device support or configuration changes are included in this release.
+- Unknown or partially supported devices continue to use the existing classifier fallback behavior.
+
 # v0.4.0 — Capability Classifier & Fan Support
 
 **Release Date:** 2026-05-27

@@ -129,6 +129,14 @@ export class CyncClient {
 	//   - twoFactor: 6-digit OTP, optional; when present we complete 2FA on restart.
 	private readonly loginConfig: { username: string; password: string; twoFactor?: string };
 
+	// Optional LAN update hook for the platform
+	private lanUpdateHandler: ((update: unknown) => void) | null = null;
+
+	// LAN Update Bridge: allow platform to handle device updates
+	public onLanDeviceUpdate(handler: (update: unknown) => void): void {
+		this.lanUpdateHandler = handler;
+	}
+
 	// LAN Auth Blob Getter: Returns the LAN login code if available
 	public getLanLoginCode(): Uint8Array {
 		if (!this.tokenData?.lanLoginCode) {
@@ -700,14 +708,9 @@ export class CyncClient {
 						// rawSwitchId is preserved for accessory identity, API correlation, and logs.
 						// controllerId is the uint32 value used for LAN packet writes (writeUInt32BE).
 						const rawSwitchId = d.switchID as number | undefined;
-						const isValidSwitchId = rawSwitchId !== undefined && Number.isSafeInteger(rawSwitchId);
-						const isComposite = isValidSwitchId && rawSwitchId > 0xffffffff;
-						const controllerId = isValidSwitchId
-							? isComposite
-								? Math.floor(rawSwitchId / 1000)
-								: rawSwitchId
-							: undefined;
-						const switchIndex = isComposite ? rawSwitchId % 1000 : undefined;
+						const isComposite = rawSwitchId !== undefined && rawSwitchId > 0xffffffff;
+						const controllerId = isComposite ? Math.floor(rawSwitchId! / 1000) : rawSwitchId;
+						const switchIndex = isComposite ? rawSwitchId! % 1000 : undefined;
 
 						// Use deviceID first, then wifiMac (stripped), then a mesh-based fallback.
 						const id =
@@ -828,7 +831,12 @@ export class CyncClient {
 
 		// REQUIRED: subscribe to parsed device updates
 		this.tcpClient.onDeviceUpdate((update) => {
-			this.log.debug('[Cync TCP] device update callback fired; payload=%o', update);
+			if (this.lanUpdateHandler) {
+				this.lanUpdateHandler(update);
+			} else {
+				// Fallback: log only
+				this.log.info('[Cync TCP] device update callback fired; payload=%o', update);
+			}
 		});
 
 		await this.tcpClient.connect(loginCode, config);

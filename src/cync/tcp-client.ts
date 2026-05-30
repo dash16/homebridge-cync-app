@@ -584,7 +584,40 @@ export class TcpClient {
 
 		return candidates;
 	}
+	// LAN Controller Resolver: Infers controller when cloud device record has no switchID
+	private resolvePrimaryControllerId(deviceId: string, rawControllerId: unknown): number | undefined {
+		const controllerId = Number(rawControllerId);
 
+		if (Number.isFinite(controllerId) && controllerId > 0) {
+			return controllerId;
+		}
+
+		for (const [homeId, devices] of Object.entries(this.homeDevices)) {
+			if (!devices.includes(deviceId)) {
+				continue;
+			}
+
+			const controllers = [...this.switchIdToHomeId.entries()]
+				.filter(([, controllerHomeId]) => controllerHomeId === homeId)
+				.map(([candidateControllerId]) => candidateControllerId)
+				.filter((candidateControllerId) => candidateControllerId > 0);
+
+			if (controllers.length === 1) {
+				const fallbackControllerId = controllers[0];
+
+				this.log.debug(
+					'[Cync TCP] inferred controller for device=%s from topology: home=%s controller=0x%s',
+					deviceId,
+					homeId,
+					fallbackControllerId.toString(16).padStart(8, '0'),
+				);
+
+				return fallbackControllerId;
+			}
+		}
+
+		return undefined;
+	}
 	// Reliable Controller Sender: Retries LAN packets through alternate controllers until state confirmation
 	// Centralizes controller failover so power, brightness, color temperature, and RGB commands use the same resilient routing.
 	private async sendWithControllerRetry(
@@ -594,10 +627,10 @@ export class TcpClient {
 		packetBuilder: (controllerId: number, seq: number) => Buffer,
 		logLabel: string,
 	): Promise<void> {
-		const controllerId = Number(record.switch_controller);
+		const controllerId = this.resolvePrimaryControllerId(deviceId, record.switch_controller);
 		const meshIndex = Number(record.mesh_id);
 
-		if (!Number.isFinite(controllerId) || !Number.isFinite(meshIndex)) {
+		if (controllerId === undefined || !Number.isFinite(meshIndex)) {
 			this.log.warn(
 				'[Cync TCP] %s: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
 				logLabel,
@@ -810,7 +843,7 @@ export class TcpClient {
 		return Buffer.concat([header, switchBytes, seqBytes, body]);
 	}
 
-	// Connection Warm-Up Ping: Sends 0xa3 to every controller before asking for mesh state. 
+	// Connection Warm-Up Ping: Sends 0xa3 to every controller before asking for mesh state.
 	// The cloud appears to require this handshake — without it,
 	// the 0x52 GetStatusPaginated query is answered with a 0x7b/0x01 rejection.
 	private buildControllerPing(controllerId: number, seq: number): Buffer {
@@ -892,7 +925,7 @@ export class TcpClient {
 	//
 	// Frame layout (after the outer 5-byte header has already been stripped by processIncoming):
 	//   [ctrl:4] [seq:2] 00 7e 00 00 00 00 f8 52 <innerLen> 00 00 00 00 00 00 <records...> <chk> 7e
-	// Records start at body offset 22 and are 24 bytes each. 
+	// Records start at body offset 22 and are 24 bytes each.
 	//   [0]=deviceIndex, [8]=isOn, [12]=brightness(0-100),
 	//   [16]=colorTone (0xfe means RGB mode), [20..22]=R,G,B
 	private parsePaginatedStateResponse(frame: Buffer): void {

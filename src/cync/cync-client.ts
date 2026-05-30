@@ -129,14 +129,6 @@ export class CyncClient {
 	//   - twoFactor: 6-digit OTP, optional; when present we complete 2FA on restart.
 	private readonly loginConfig: { username: string; password: string; twoFactor?: string };
 
-	// Optional LAN update hook for the platform
-	private lanUpdateHandler: ((update: unknown) => void) | null = null;
-
-	// LAN Update Bridge: allow platform to handle device updates
-	public onLanDeviceUpdate(handler: (update: unknown) => void): void {
-		this.lanUpdateHandler = handler;
-	}
-
 	// LAN Auth Blob Getter: Returns the LAN login code if available
 	public getLanLoginCode(): Uint8Array {
 		if (!this.tokenData?.lanLoginCode) {
@@ -836,12 +828,7 @@ export class CyncClient {
 
 		// REQUIRED: subscribe to parsed device updates
 		this.tcpClient.onDeviceUpdate((update) => {
-			if (this.lanUpdateHandler) {
-				this.lanUpdateHandler(update);
-			} else {
-				// Fallback: log only
-				this.log.info('[Cync TCP] device update callback fired; payload=%o', update);
-			}
+			this.log.debug('[Cync TCP] device update callback fired; payload=%o', update);
 		});
 
 		await this.tcpClient.connect(loginCode, config);

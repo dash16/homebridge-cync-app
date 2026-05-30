@@ -2,10 +2,10 @@
 
 ## v0.4.1 — Maintenance Sweep
 
-**Release Date:** 2026-05-30
+**Release Date:** 2026-05-29
 
 ### Changed
-- Reduced routine LAN device update logging from info to debug.
+- Reduced routine LAN device update logging from **info** to **debug**.
 - Kept device classification behavior centralized in `device-classifier.ts` while simplifying catalog metadata to descriptive model information.
 
 ### Fixed

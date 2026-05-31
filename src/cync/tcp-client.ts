@@ -615,7 +615,17 @@ export class TcpClient {
 				return fallbackControllerId;
 			}
 		}
+		if (this.switchIdToHomeId.size === 1) {
+			const fallbackControllerId = [...this.switchIdToHomeId.keys()][0];
 
+			this.log.debug(
+				'[Cync TCP] inferred controller for device=%s from single global controller: controller=0x%s',
+				deviceId,
+				fallbackControllerId.toString(16).padStart(8, '0'),
+			);
+
+			return fallbackControllerId;
+		}
 		return undefined;
 	}
 	// Reliable Controller Sender: Retries LAN packets through alternate controllers until state confirmation

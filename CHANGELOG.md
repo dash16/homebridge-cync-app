@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.3
+## v0.4.2
 
 ### Added
 
@@ -13,10 +13,17 @@
 * Known controller devices are now skipped instead of being exposed as fallback Switch accessories.
 
 ### Fixed
-
+* Improved controller resolution logic for certain Cync devices.
+* Corrected device-to-controller association issues that could prevent devices from responding to HomeKit commands.
+* Added additional validation and hardening around controller selection.
+* Improved diagnostic logging used to identify controller resolution problems.
 * Resolves #23.
 * Resolves #24.
 * Resolves #25 for basic whole-device light support.
+
+### Notes
+
+DeviceType `76` appears to support dynamic scene and RGBIC-style functionality within the Cync app. This release enables standard HomeKit light controls while deeper RGBIC capabilities remain under investigation.
 
 ## v0.4.1 — Maintenance Sweep
 

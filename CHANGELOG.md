@@ -17,6 +17,7 @@
 * Corrected device-to-controller association issues that could prevent devices from responding to HomeKit commands.
 * Added additional validation and hardening around controller selection.
 * Improved diagnostic logging used to identify controller resolution problems.
+* Resolves #21.
 * Resolves #23.
 * Resolves #24.
 * Resolves #25 for basic whole-device light support.

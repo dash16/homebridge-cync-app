@@ -2,7 +2,7 @@
 	"name": "homebridge-cync-app",
 	"displayName": "Homebridge Cync App",
 	"type": "module",
-	"version": "0.4.2-beta.1",
+	"version": "0.4.3",
 	"private": false,
 	"description": "Homebridge plugin that integrates your GE Cync account (via the Cync app/API) and exposes all supported devices: plugs, lights, switches, etc",
 	"author": "Dustin Newell",
@@ -10,7 +10,7 @@
 	"homepage": "https://github.com/dash16/homebridge-cync-app#readme",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/dash16/homebridge-cync-app.git"
+		"url": "https://github.com/dash16/homebridge-cync-app.git"
 	},
 	"bugs": {
 		"url": "https://github.com/dash16/homebridge-cync-app/issues"
@@ -35,7 +35,7 @@
 	},
 	"engines": {
 		"node": "^20.18.0 || ^22.10.0 || ^24.0.0",
-		"homebridge": "^1.8.0 || ^2.0.0-beta.0"
+		"homebridge": "^1.8.0 || ^2.0.0"
 	},
 	"scripts": {
 		"build": "rimraf ./dist && tsc",

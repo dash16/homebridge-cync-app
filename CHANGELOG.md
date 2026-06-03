@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.4.3
+
+### Added
+
+* Added light classification for deviceType `76` — Outdoor 48" Dynamic Effects Light Strip.
+* Added light classification for deviceType `174` — 4" Full Color Wafer Downlight.
+
+### Changed
+
+* Added explicit ignored-device handling for deviceType `115` Bluetooth remotes/controllers.
+* Known controller devices are now skipped instead of being exposed as fallback Switch accessories.
+
+### Fixed
+
+* Resolves #23.
+* Resolves #24.
+* Resolves #25 for basic whole-device light support.
+
 ## v0.4.1 — Maintenance Sweep
 
 **Release Date:** 2026-05-29

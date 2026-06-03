@@ -442,6 +442,32 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				const uuidSeed = `cync-${mesh.id}-${deviceId}`;
 				const uuid = this.api.hap.uuid.generate(uuidSeed);
 
+				const deviceType = resolveDeviceType(device);
+				const classification = classifyCyncDevice(device, deviceType);
+
+				this.log.debug(
+					'Cync device classification: ' +
+					`name="${deviceName}" ` +
+					`deviceId=${deviceId} ` +
+					`deviceType=${classification.deviceType ?? 'unknown'} ` +
+					`capabilities=${classification.capabilities.join(',') || 'none'} ` +
+					`accessoryType=${classification.accessoryType} ` +
+					`reason="${classification.reason}"`,
+				);
+
+				const deviceTypeStr =
+					typeof deviceType === 'number' ? String(deviceType) : 'unknown';
+
+				if (classification.accessoryType === 'ignored') {
+					this.log.info(
+						'Cync: ignoring controller device %s (deviceType=%s, deviceId=%s)',
+						deviceName,
+						deviceTypeStr,
+						deviceId,
+					);
+					continue;
+				}
+
 				let accessory = this.accessories.find(acc => acc.UUID === uuid);
 
 				if (accessory) {
@@ -462,21 +488,6 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				// Optional safety net (accessory modules also register this)
 				this.deviceIdToAccessory.set(deviceId, accessory);
-
-				const deviceType = resolveDeviceType(device);
-				const classification = classifyCyncDevice(device, deviceType);
-
-				this.log.debug(
-					'Cync device classification: ' +
-					`name="${deviceName}" ` +
-					`deviceId=${deviceId} ` +
-					`deviceType=${classification.deviceType ?? 'unknown'} ` +
-					`capabilities=${classification.capabilities.join(',') || 'none'} ` +
-					`accessoryType=${classification.accessoryType} ` +
-					`reason="${classification.reason}"`,
-				);
-				const deviceTypeStr =
-					typeof deviceType === 'number' ? String(deviceType) : 'unknown';
 
 				if (classification.accessoryType === 'fan') {
 					this.log.info(

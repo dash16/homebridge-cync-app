@@ -49,6 +49,12 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 		marketingName: 'Dynamic Effects Smart Light Strip (32ft)',
 		notes: 'Full color light strip.',
 	},
+	76: {
+		deviceType: 76,
+		modelName: 'Outdoor 48ft Dynamic Effects Café Light',
+		marketingName: 'Dynamic Effects Smart Café Lights (48ft)',
+		notes: 'Possible RGBIC device',
+	},
 	110: {
 		deviceType: 110,
 		modelName: 'Direct Connect Strip - Thin Style (16ft)',
@@ -96,6 +102,12 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 		modelName: 'Indoor Smart Plug (3in1)',
 		marketingName: 'Cync Indoor Smart Plug',
 		notes: 'Matter-capable hardware. Replaces legacy C by GE On/Off Smart Plug.',
+	},
+	174: {
+		deviceType: 174,
+		modelName: '4” Full Color Wafer Downlight',
+		marketingName: 'Cync reveal® HD+ 4-In. Wafer Smart LED Downlight',
+		notes: 'Matter-capable hardware.',
 	},
 };
 

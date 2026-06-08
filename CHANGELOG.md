@@ -1,6 +1,17 @@
 # Changelog
 
+## v0.4.4
+
+**Release Date:** 2026-06-08
+
+### Fixed
+
+- Fixed color temperature brightness adjustments using an inverted CT conversion.
+- Fixed brightness adjustments after Homebridge restart when color state had not yet been fully restored.
+
 ## v0.4.3
+
+**Release Date:** 2026-06-08
 
 ### Fixed
 
@@ -19,6 +30,8 @@
 - Improved preservation of cached light state during brightness-only operations.
 
 ## v0.4.2
+
+**Release Date:** 2026-06-03
 
 ### Added
 

@@ -197,8 +197,7 @@ export function configureCyncLightAccessory(
 
 			try {
 				const isCtMode =
-					cyncMeta.colorActive === false &&
-					typeof cyncMeta.colorTemperature === 'number';
+					!cyncMeta.colorActive && typeof cyncMeta.colorTemperature === 'number';
 
 				if (isCtMode) {
 					env.log.debug(
@@ -227,7 +226,7 @@ export function configureCyncLightAccessory(
 							brightnessPct: brightness,
 							ctMinMired,
 							ctMaxMired,
-							invertTone: false,
+							invertTone: true,
 						},
 						cyncMeta.deviceType,
 					);
@@ -433,9 +432,7 @@ export function configureCyncLightAccessory(
 						ctMinMired,
 						ctMaxMired,
 
-						// If warm/cool moves the wrong direction for your bulbs,
-						// flip this to true (and later make it configurable).
-						invertTone: false,
+						invertTone: true,
 					},
 					cyncMeta.deviceType,
 				);

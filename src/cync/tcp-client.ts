@@ -101,7 +101,6 @@ export class TcpClient {
 	private connectInFlight: Promise<void> | null = null;
 	private shuttingDown = false;
 	private readonly lanDeviceUpdateListeners: LanDeviceUpdateListener[] = [];
-	private observedNonTrivialLevel = new Map<string, boolean>();
 	private pendingPowerCommands = new Map<string, {
 		deviceId: string;
 		on: boolean;
@@ -984,14 +983,10 @@ export class TcpClient {
 				rgb,
 			);
 
-			if (on && brightnessPct > 0 && brightnessPct < 100) {
-				this.observedNonTrivialLevel.set(deviceId, true);
-			}
-
 			this.emitLanDeviceUpdate({
 				deviceId,
 				on,
-				brightnessPct: this.observedNonTrivialLevel.get(deviceId) ? brightnessPct : undefined,
+				brightnessPct,
 				rgb,
 			});
 		}
@@ -1177,6 +1172,10 @@ export class TcpClient {
 		deviceId: string,
 		brightnessPct: number,
 		_deviceType?: number,
+		colorState?: {
+			colorActive?: boolean;
+			rgb?: { r: number; g: number; b: number };
+		},
 	): Promise<void> {
 		return this.enqueueCommand(async () => {
 			void _deviceType;
@@ -1220,6 +1219,14 @@ export class TcpClient {
 
 			const on = clamped > 0;
 			const level = hkBrightnessToPct100Byte(clamped);
+
+			const fallbackRgb = { r: 255, g: 255, b: 255 };
+
+			const rgbToSend: { r: number; g: number; b: number } =
+				colorState?.colorActive === true && colorState.rgb
+					? colorState.rgb
+					: fallbackRgb;
+
 			await this.sendWithControllerRetry(
 				deviceId,
 				record,
@@ -1230,7 +1237,7 @@ export class TcpClient {
 					on,
 					level,
 					254,
-					{ r: 255, g: 255, b: 255 },
+					rgbToSend,
 					seq,
 				),
 				'combo brightness',
@@ -1491,22 +1498,8 @@ export class TcpClient {
 
 				const rgb = type === 0x83 ? this.tryParseRgbFrom83(frame) : undefined;
 
-				let brightnessPct: number | undefined = undefined;
-
-				// Only treat level as meaningful if we've ever seen a non-0/100 value for this device
 				const devId = lanParsed.deviceId;
-				const lvl = lanParsed.brightnessPct;
-
-				const alreadyNonTrivial = this.observedNonTrivialLevel.get(devId) === true;
-				const isNonTrivial = lvl > 0 && lvl < 100;
-
-				if (isNonTrivial) {
-					this.observedNonTrivialLevel.set(devId, true);
-					brightnessPct = lvl;
-				} else if (alreadyNonTrivial) {
-					// Once we know it’s a dimmer, keep reporting 0/100 too.
-					brightnessPct = lvl;
-				}
+				const brightnessPct = lanParsed.brightnessPct;
 
 				this.emitLanDeviceUpdate({
 					deviceId: devId,

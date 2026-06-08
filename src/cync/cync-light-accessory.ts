@@ -138,7 +138,7 @@ export function configureCyncLightAccessory(
 			}
 		});
 
-	// ----- Brightness (dimming via LAN combo_control) -----
+	// ----- Brightness (dimming via LAN combo_control / CT control) -----
 	service
 		.getCharacteristic(Characteristic.Brightness)
 		.onGet(() => {
@@ -195,16 +195,59 @@ export function configureCyncLightAccessory(
 				cyncMeta.deviceId,
 			);
 
-			env.log.debug(
-				'Cync: Brightness.set sending brightness-only (colorActive=%s rgb=%o)',
-				String(!!cyncMeta.colorActive),
-				cyncMeta.rgb,
-			);
-
 			try {
-				// Always treat Brightness as a brightness-only operation.
-				// Color should only be sent when Hue/Saturation changes.
-				await env.tcpClient.setBrightness(cyncMeta.deviceId, brightness, cyncMeta.deviceType);
+				const isCtMode =
+					cyncMeta.colorActive === false &&
+					typeof cyncMeta.colorTemperature === 'number';
+
+				if (isCtMode) {
+					env.log.debug(
+						'Cync: Brightness.set preserving CT mode (mired=%d brightness=%d)',
+						cyncMeta.colorTemperature,
+						brightness,
+					);
+
+					const colorTemperature = cyncMeta.colorTemperature;
+
+					if (typeof colorTemperature !== 'number') {
+						env.log.warn(
+							'Cync: Brightness.set CT mode for %s but no cached color temperature is available',
+							deviceName,
+						);
+						return;
+					}
+
+					const ctMinMired = 153;
+					const ctMaxMired = 500;
+
+					await env.tcpClient.setColorTemperature(
+						cyncMeta.deviceId,
+						{
+							mired: colorTemperature,
+							brightnessPct: brightness,
+							ctMinMired,
+							ctMaxMired,
+							invertTone: false,
+						},
+						cyncMeta.deviceType,
+					);
+				} else {
+					env.log.debug(
+						'Cync: Brightness.set preserving RGB state (colorActive=%s rgb=%o)',
+						String(!!cyncMeta.colorActive),
+						cyncMeta.rgb,
+					);
+
+					await env.tcpClient.setBrightness(
+						cyncMeta.deviceId,
+						brightness,
+						cyncMeta.deviceType,
+						{
+							colorActive: cyncMeta.colorActive,
+							rgb: cyncMeta.rgb,
+						},
+					);
+				}
 
 				env.markDeviceSeen(cyncMeta.deviceId);
 			} catch (err) {
@@ -220,7 +263,6 @@ export function configureCyncLightAccessory(
 				);
 			}
 		});
-
 	// ----- Hue -----
 	service
 		.getCharacteristic(Characteristic.Hue)

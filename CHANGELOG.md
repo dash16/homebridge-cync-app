@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.4.3
+
+### Fixed
+
+- Fixed colored Cync bulbs turning white when brightness is adjusted from Apple Home.
+  - Brightness commands now preserve the currently selected RGB color instead of sending a hardcoded white value.
+
+- Fixed brightness adjustments for color temperature (white mode) bulbs.
+  - Brightness changes now preserve the current color temperature and use the appropriate control path for CT-capable devices.
+
+- Fixed brightness state reporting after Homebridge startup.
+  - Devices now report their actual brightness level immediately instead of sometimes defaulting to 100% until a non-trivial dim level is observed.
+
+### Internal
+
+- Simplified LAN brightness state handling by removing legacy brightness filtering logic.
+- Improved preservation of cached light state during brightness-only operations.
+
 ## v0.4.2
 
 ### Added

@@ -1142,8 +1142,6 @@ export class TcpClient {
 			const on = hkBrightness > 0;
 			const level = hkBrightnessToPct100Byte(hkBrightness);
 
-			// Most likely CT control: use tone byte as a scaled CT value.
-			// If it moves the wrong direction (warm↔cool), flip invertTone=true.
 			const invertTone = params.invertTone === true;
 			const tone = scaleToByte(mired, ctMinMired, ctMaxMired, invertTone);
 
@@ -1427,13 +1425,9 @@ export class TcpClient {
 				const pending = this.pendingPowerCommands.get(pendingKey);
 				const ageMs = pending ? Date.now() - pending.sentAt : undefined;
 
-				// Only treat as a rejection (warn) if the seq matches a power
-				// command we sent. The cloud also emits 0x78 ACKs for mesh-state
-				// queries, heartbeats, and other unsolicited frames — those are
-				// normal traffic and don't indicate a problem.
-				const logFn = pending ? this.log.warn : this.log.debug;
+				const logFn = this.log.debug;
 				const label = pending
-					? 'Possible cmd rejection frame'
+					? 'Command status frame'
 					: 'ACK frame (non-command)';
 
 				logFn.call(

@@ -847,7 +847,7 @@ export class TcpClient {
 		seqBytes.writeUInt16BE(seq, 0);
 
 		// EXPERIMENTAL: same LAN wrapper as power, with guessed light-show subtype.
-		const middle = Buffer.from('007e00000000f8d00d000000000000', 'hex');
+		const middle = Buffer.from('007e00000000f8f00d000000000000', 'hex');
 
 		const meshBytes = Buffer.alloc(2);
 		meshBytes.writeUInt16LE(meshId, 0);
@@ -861,20 +861,22 @@ export class TcpClient {
 		);
 
 		// EXPERIMENTAL payload shape.
-		const tail = Buffer.from([
-			0xd0,
-			0x00,
-			0x02,
-			showByte,
-			0x00,
-			0x00,
+		const tail = Buffer.concat([
+			Buffer.from([
+				0xf0,
+				0x00,
+				0x06,
+				showByte,
+			]),
+			crcBytes,
 		]);
 
 		const checksumSeed =
 			429 +
 			meshBytes[0] +
 			meshBytes[1] +
-			showByte;
+			showByte +
+			crcBytes.reduce((sum, byte) => sum + byte, 0);
 
 		const checksum = Buffer.from([checksumSeed & 0xff]);
 		const end = Buffer.from('7e', 'hex');

@@ -7,7 +7,7 @@ import {
 } from './config-client.js';
 import { TcpClient } from './tcp-client.js';
 import { CyncTokenStore, CyncTokenData } from './token-store.js';
-
+import { parseLightShows } from './light-shows.js';
 
 type SessionWithPossibleTokens = {
 	accessToken?: string;
@@ -634,6 +634,24 @@ export class CyncClient {
 					Object.keys(props),
 				);
 
+				const propsRecord = props as Record<string, unknown>;
+
+				if (propsRecord.sceneArray !== undefined) {
+					this.log.debug(
+						'CyncClient: mesh %s sceneArray=%s',
+						meshName,
+						JSON.stringify(propsRecord.sceneArray, null, 2),
+					);
+				}
+
+				if (propsRecord.lightShows !== undefined) {
+					this.log.debug(
+						'CyncClient: mesh %s lightShows=%s',
+						meshName,
+						JSON.stringify(propsRecord.lightShows, null, 2),
+					);
+				}
+
 				type DeviceProps = Record<string, unknown>;
 				const bulbsArray = (props as DeviceProps).bulbsArray as unknown;
 
@@ -736,6 +754,13 @@ export class CyncClient {
 							}
 						}
 
+						const rawLightShowCrcMap = d.savedLightShowsCrcMap;
+
+						const deviceLightShows = parseLightShows(
+							propsRecord.lightShows,
+							rawLightShowCrcMap,
+						);
+
 						devicesForMesh.push({
 							id,
 							name: displayName ?? undefined,
@@ -747,6 +772,7 @@ export class CyncClient {
 							raw_switch_id: rawSwitchId,
 							...(switchIndex !== undefined && { switch_index: switchIndex }),
 							raw: d,
+							...(deviceLightShows.length > 0 && { light_shows: deviceLightShows }),
 						});
 					}
 
@@ -820,22 +846,13 @@ export class CyncClient {
 		const topology = this.getLanTopology();
 		this.tcpClient.applyLanTopology(topology);
 
-		// Optional: dump all frames as hex for debugging
-		this.tcpClient.onRawFrame((frame) => {
-			this.log.debug(
-				'[Cync TCP] raw frame (%d bytes): %s',
-				frame.byteLength,
-				frame.toString('hex'),
-			);
-		});
-
 		// REQUIRED: subscribe to parsed device updates
 		this.tcpClient.onDeviceUpdate((update) => {
 			if (this.lanUpdateHandler) {
 				this.lanUpdateHandler(update);
 			} else {
 				// Fallback: log only
-				this.log.info('[Cync TCP] device update callback fired; payload=%o', update);
+				this.log.debug('[Cync TCP] device update callback fired; payload=%o', update);
 			}
 		});
 

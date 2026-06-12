@@ -311,6 +311,7 @@ export class TcpClient {
 		// Previously the socket only opened on the first user-initiated SET,
 		// which left HomeKit showing stale "off" state until the user toggled.
 		await this.ensureConnected();
+
 	}
 
 	public applyLanTopology(topology: {
@@ -530,7 +531,7 @@ export class TcpClient {
 			if (!this.socket || this.socket.destroyed) {
 				return;
 			}
-			this.socket.write(Buffer.from('d300000000', 'hex'));
+			this.writeSocket(Buffer.from('d300000000', 'hex'), 'heartbeat');
 		}, 180_000);
 	}
 
@@ -682,7 +683,7 @@ export class TcpClient {
 					resolve: (confirmed) => resolve(!confirmed),
 				});
 
-				socket.write(packet);
+				this.writeSocket(packet, logLabel);
 
 				this.log.info(
 					'[Cync TCP] Sent %s packet: device=%s on=%s seq=%d controller=0x%s',
@@ -889,7 +890,7 @@ export class TcpClient {
 		for (const controllerId of this.switchIdToHomeId.keys()) {
 			const seq = this.nextSeq();
 			const packet = this.buildControllerPing(controllerId, seq);
-			socket.write(packet);
+			this.writeSocket(packet, 'controller ping');
 
 			this.log.debug(
 				'[Cync TCP] Mesh-state warm-up ping: controller=0x%s seq=%d',
@@ -918,7 +919,7 @@ export class TcpClient {
 
 			const seq = this.nextSeq();
 			const packet = this.buildMeshInfoRequest(controllerId, seq);
-			this.socket.write(packet);
+			this.writeSocket(packet, 'mesh-state request');
 
 			this.log.info(
 				'[Cync TCP] Requested mesh state: controller=0x%s home=%s seq=%d packet=%s',
@@ -928,6 +929,19 @@ export class TcpClient {
 				formatHex(packet),
 			);
 		}
+	}
+
+	public async testActivateLightShow(
+		deviceId: string,
+		showId: number,
+		crc: number,
+	): Promise<void> {
+		this.log.warn(
+			'[Cync TCP] TEST activate light show: device=%s showId=%d crc=%d',
+			deviceId,
+			showId,
+			crc,
+		);
 	}
 
 	// Mesh State Response Parser: decodes the paginated 0x52 response into per-device updates.
@@ -1338,11 +1352,12 @@ export class TcpClient {
 
 	private attachSocketListeners(socket: net.Socket): void {
 		socket.on('data', (chunk) => {
-			this.log.debug(
-				'[Cync TCP] RX raw chunk bytes=%d hex=%s',
-				chunk.byteLength,
-				formatHex(chunk),
-			);
+			// Deep packet debugging only:
+			// this.log.debug(
+			//	'[Cync TCP] RX raw chunk bytes=%d hex=%s',
+			//	chunk.byteLength,
+			//	formatHex(chunk),
+			// );
 
 			this.log.debug('[Cync TCP] received %d bytes from server', chunk.byteLength);
 
@@ -1377,6 +1392,21 @@ export class TcpClient {
 		});
 	}
 
+	private writeSocket(packet: Buffer, label: string): void {
+		if (!this.socket || this.socket.destroyed) {
+			this.log.warn('[Cync TCP] %s: socket not available for write.', label);
+			return;
+		}
+
+		this.log.debug(
+			'[Cync TCP] TX raw %s bytes=%d hex=%s',
+			label,
+			packet.byteLength,
+			formatHex(packet),
+		);
+
+		this.socket.write(packet);
+	}
 
 	private processIncoming(): void {
 		while (this.readBuffer.length >= 5) {
@@ -1392,10 +1422,9 @@ export class TcpClient {
 
 			// Debug log with full hex dump so we can reverse-engineer the protocol
 			this.log.debug(
-				'[Cync TCP] frame type=0x%s len=%d body=%s',
+				'[Cync TCP] frame type=0x%s len=%d',
 				type.toString(16).padStart(2, '0'),
 				len,
-				body.toString('hex'),
 			);
 
 			if (type === 0x7b && body.length >= 6) {
@@ -1475,6 +1504,7 @@ export class TcpClient {
 		// 0x73 or 0x83 with inner subtype 0x52 is a paginated mesh-state response
 		// (reply to the request emitted by requestMeshState on connect). The cloud
 		// returns the response as 0x83 in practice.
+
 		if (
 			(type === 0x73 || type === 0x83) &&
 			frame.length >= 14 &&
@@ -1482,6 +1512,30 @@ export class TcpClient {
 		) {
 			this.parsePaginatedStateResponse(frame);
 			return;
+		}
+
+		if (type === 0x43) {
+			this.log.debug(
+				'[Cync TCP] compact frame 0x43: len=%d body=%s b0=%d b1=%d b2=%d b3=%d b4=%d b5=%d b6=%d',
+				frame.length,
+				formatHex(frame),
+				frame[0],
+				frame[1],
+				frame[2],
+				frame[3],
+				frame[4],
+				frame[5],
+				frame[6],
+			);
+		}
+
+		if ((type === 0x73 || type === 0x83) && frame.length >= 14) {
+			this.log.debug(
+				'[Cync TCP] routed frame type=0x%s innerSubtype=0x%s len=%d',
+				type.toString(16).padStart(2, '0'),
+				frame[13].toString(16).padStart(2, '0'),
+				frame.length,
+			);
 		}
 
 		if (type === 0x73 || type === 0x83) {

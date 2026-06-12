@@ -455,6 +455,42 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					`reason="${classification.reason}"`,
 				);
 
+				this.log.debug(
+					'Cync device discovery details: %s',
+					JSON.stringify({
+						name: device.name,
+						id: device.id,
+						type: device.type,
+						model: device.model,
+						productName: device.productName,
+						product_name: device.product_name,
+						firmware: device.firmware,
+						firmwareVersion: device.firmwareVersion,
+						mac: device.mac,
+						roomId: device.roomId,
+						locationId: device.locationId,
+						capabilities: device.capabilities,
+					}, null, 2),
+				);
+
+				const rawDevice =
+					record.raw && typeof record.raw === 'object'
+						? record.raw as Record<string, unknown>
+						: undefined;
+
+				const savedLightShowsCrcMap = rawDevice?.savedLightShowsCrcMap;
+
+				if (
+					savedLightShowsCrcMap &&
+					typeof savedLightShowsCrcMap === 'object'
+				) {
+					this.log.debug(
+						'Cync RGBIC candidate: %s has savedLightShowsCrcMap=%s',
+						deviceName,
+						JSON.stringify(savedLightShowsCrcMap),
+					);
+				}
+
 				const deviceTypeStr =
 					typeof deviceType === 'number' ? String(deviceType) : 'unknown';
 

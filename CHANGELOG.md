@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.5
+
+**Release Date:** 2026-06-10
+
+### Added
+- Added device classification support for Cync Gen 1 Paddle Dimmer switches (device type 125).
+- Introduced native switch accessory handling for supported Cync switch devices.
+
+### Changed
+- Unsupported device types are now skipped instead of being automatically exposed as HomeKit switches.
+- Improved device classification accuracy by requiring explicit switch classification before creating switch accessories.
+
+### Fixed
+- Prevented unknown or unsupported Cync devices from appearing as incorrect HomeKit switch accessories.
+
 ## v0.4.4
 
 **Release Date:** 2026-06-08

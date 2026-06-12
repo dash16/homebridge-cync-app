@@ -67,6 +67,12 @@ export const DEVICE_CATALOG: Record<number, CyncDeviceModel> = {
 		marketingName: 'Direct Connect Smart Light Strip',
 		notes: 'Full color light strip; cloud payload lacks color/level fields, so prefer LAN capability/state detection.',
 	},
+	125: {
+		deviceType: 125,
+		modelName: 'Gen 1 Paddle Dimmer (3-Way)',
+		marketingName: 'Smart Paddle Dimmer Light Switch',
+		notes: 'Reported in issue #28. Initial support exposes as HomeKit Switch; dimming support may require additional LAN/state capture.',
+	},
 	128: {
 		deviceType: 128,
 		modelName: 'Soft White Direct Connect Smart Bulb',

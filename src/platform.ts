@@ -653,19 +653,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					);
 				} else if (classification.accessoryType === 'unsupported') {
 					this.log.warn(
-						'Cync: unsupported device %s (deviceType=%s, deviceId=%s); configuring as Switch fallback',
+						'Cync: unsupported device %s (deviceType=%s, deviceId=%s); skipping',
 						deviceName,
 						deviceTypeStr,
 						deviceId,
 					);
-					configureCyncSwitchAccessory(
-						this.accessoryEnv,
-						mesh,
-						device,
-						accessory,
-						deviceName,
-						deviceId,
-					);
+					continue;
 				} else {
 					this.log.info(
 						'Cync: configuring %s as Switch (deviceType=%s, deviceId=%s)',

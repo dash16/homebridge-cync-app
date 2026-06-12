@@ -36,6 +36,10 @@ const CYNC_FAN_DEVICE_TYPES = new Set([
 	81,
 ]);
 
+const CYNC_SWITCH_DEVICE_TYPES = new Set([
+	125,
+]);
+
 const CYNC_IGNORED_DEVICE_TYPES = new Set([
 	115,
 ]);
@@ -119,6 +123,15 @@ export function classifyCyncDevice(
 	if (deviceType !== undefined && CYNC_OUTLET_DEVICE_TYPES.has(deviceType)) {
 		return {
 			accessoryType: 'outlet',
+			deviceType,
+			capabilities,
+			reason: `deviceType: ${deviceType}`,
+		};
+	}
+
+	if (deviceType !== undefined && CYNC_SWITCH_DEVICE_TYPES.has(deviceType)) {
+		return {
+			accessoryType: 'switch',
 			deviceType,
 			capabilities,
 			reason: `deviceType: ${deviceType}`,

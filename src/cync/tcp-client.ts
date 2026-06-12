@@ -830,6 +830,69 @@ export class TcpClient {
 			end,
 		]);
 	}
+
+	private buildLightShowPacket(
+		controllerId: number,
+		meshId: number,
+		showIndex: number,
+		crc: number | undefined,
+		seq: number,
+	): Buffer {
+		const header = Buffer.from('730000001f', 'hex');
+
+		const switchBytes = Buffer.alloc(4);
+		switchBytes.writeUInt32BE(controllerId, 0);
+
+		const seqBytes = Buffer.alloc(2);
+		seqBytes.writeUInt16BE(seq, 0);
+
+		// EXPERIMENTAL: same LAN wrapper as power, with guessed light-show subtype.
+		const middle = Buffer.from('007e00000000f8d00d000000000000', 'hex');
+
+		const meshBytes = Buffer.alloc(2);
+		meshBytes.writeUInt16LE(meshId, 0);
+
+		const showByte = Math.max(0, Math.min(255, Math.round(showIndex)));
+
+		const crcBytes = Buffer.alloc(4);
+		crcBytes.writeUInt32BE(
+			Number.isFinite(Number(crc)) ? Number(crc) : 0,
+			0,
+		);
+
+		// EXPERIMENTAL payload shape.
+		const tail = Buffer.from([
+			0xd0,
+			0x00,
+			0x02,
+			showByte,
+			0x00,
+			0x00,
+		]);
+
+		const checksumSeed =
+			429 +
+			meshBytes[0] +
+			meshBytes[1] +
+			showByte;
+
+		const checksum = Buffer.from([checksumSeed & 0xff]);
+		const end = Buffer.from('7e', 'hex');
+
+		void crcBytes;
+
+		return Buffer.concat([
+			header,
+			switchBytes,
+			seqBytes,
+			middle,
+			meshBytes,
+			tail,
+			checksum,
+			end,
+		]);
+	}
+
 	// Mesh State Query: requests a snapshot of every device's on/off, brightness, CT, and RGB
 	// from a controller. Used on each successful TCP connect so HomeKit shows the correct
 	// state without waiting for the user to toggle a light.
@@ -931,17 +994,60 @@ export class TcpClient {
 		}
 	}
 
-	public async testActivateLightShow(
+	public async activateLightShow(
 		deviceId: string,
-		showId: number,
-		crc: number,
-	): Promise<void> {
-		this.log.warn(
-			'[Cync TCP] TEST activate light show: device=%s showId=%d crc=%d',
-			deviceId,
-			showId,
-			crc,
-		);
+		showIndex: number,
+		crc?: number,
+	): Promise<boolean> {
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] activateLightShow: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn(
+					'[Cync TCP] activateLightShow: socket not ready even after reconnect attempt.',
+				);
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] activateLightShow: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+
+			if (!Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] activateLightShow: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
+					deviceId,
+					record.switch_controller,
+					record.mesh_id,
+				);
+				return false;
+			}
+
+			await this.sendWithControllerRetry(
+				deviceId,
+				record,
+				true,
+				(candidateControllerId, seq) => this.buildLightShowPacket(
+					candidateControllerId,
+					meshIndex,
+					showIndex,
+					crc,
+					seq,
+				),
+				'light show',
+			);
+
+			return true;
+		});
 	}
 
 	// Mesh State Response Parser: decodes the paginated 0x52 response into per-device updates.

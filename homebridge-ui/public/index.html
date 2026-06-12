@@ -50,6 +50,23 @@
 	</div>
 </div>
 
+<div class="card mb-3">
+	<div class="card-body">
+		<h5 class="card-title">Experimental Features</h5>
+
+		<div class="form-check">
+			<input type="checkbox" id="cyncExposeLightShows" class="form-check-input">
+			<label for="cyncExposeLightShows" class="form-check-label">
+				Expose saved Light Shows as HomeKit switches
+			</label>
+		</div>
+
+		<p class="text-muted mt-2 mb-0">
+			Shows saved on supported RGBIC devices may appear as separate HomeKit switches.
+		</p>
+	</div>
+</div>
+
 <script>
 homebridge.addEventListener('ready', async () => {
 	const emailInput = document.getElementById('cyncEmail');
@@ -58,9 +75,20 @@ homebridge.addEventListener('ready', async () => {
 	const requestOtpBtn = document.getElementById('cyncRequestOtpBtn');
 	const signOutBtn = document.getElementById('cyncSignOutBtn');
 	const statusEl = document.getElementById('cyncStatus');
+	const exposeLightShowsInput = document.getElementById('cyncExposeLightShows');
 
 	let pluginConfig = await homebridge.getPluginConfig();
 	let cfg = pluginConfig[0] || {};
+
+
+	exposeLightShowsInput.checked = cfg.exposeLightShows === true;
+
+	exposeLightShowsInput.addEventListener('change', async () => {
+		await updateConfig({
+			exposeLightShows: exposeLightShowsInput.checked,
+		});
+		statusEl.textContent = 'Experimental feature setting updated. Click Save.';
+	});
 
 	// Helper to update in-memory pluginConfig (persisted when user clicks Save in HB)
 	async function updateConfig(partial) {

@@ -29,6 +29,12 @@
 				"type": "string",
 				"pattern": "^[0-9]{6}$",
 				"description": "Temporary 6-digit code emailed by Cync when you sign in. Leave blank normally; only needed when performing a fresh login."
+			},
+			"exposeLightShows": {
+				"title": "Expose Light Shows",
+				"type": "boolean",
+				"default": false,
+				"description": "Create optional HomeKit switches for saved Cync light shows discovered on supported RGBIC devices. Experimental."
 			}
 		},
 		"required": [

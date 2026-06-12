@@ -187,6 +187,7 @@ export class CyncClient {
 		}
 		return Date.now() >= (expiresAt - skewMs);
 	}
+
 	/**
 		 * Ensure we are logged in:
 		 * 1) Try stored token.
@@ -756,10 +757,11 @@ export class CyncClient {
 
 						const rawLightShowCrcMap = d.savedLightShowsCrcMap;
 
-						const deviceLightShows = parseLightShows(
-							propsRecord.lightShows,
-							rawLightShowCrcMap,
-						);
+						const deviceLightShows =
+							rawLightShowCrcMap &&
+							typeof rawLightShowCrcMap === 'object'
+								? parseLightShows(propsRecord.lightShows, rawLightShowCrcMap)
+								: [];
 
 						devicesForMesh.push({
 							id,
@@ -833,6 +835,14 @@ export class CyncClient {
 		);
 
 		return cfg;
+	}
+
+	public async activateLightShow(
+		deviceId: string,
+		showIndex: number,
+		crc?: number,
+	): Promise<boolean> {
+		return this.tcpClient.activateLightShow(deviceId, showIndex, crc);
 	}
 
 	public async startTransport(

@@ -24,6 +24,7 @@ import { configureCyncLightAccessory } from './cync/cync-light-accessory.js';
 import { configureCyncSwitchAccessory } from './cync/cync-switch-accessory.js';
 import { configureCyncOutletAccessory } from './cync/cync-outlet-accessory.js';
 import { configureCyncFanAccessory } from './cync/cync-fan-accessory.js';
+import { configureCyncLightShowAccessory } from './cync/cync-light-show-accessory.js';
 import { classifyCyncDevice } from './cync/device-classifier.js';
 
 const toCyncLogger = (log: Logger): CyncLogger => ({
@@ -68,7 +69,6 @@ function promoteCapabilitiesFromLan(
 	return changed;
 }
 
-
 export class CyncAppPlatform implements DynamicPlatformPlugin {
 	public readonly accessories: PlatformAccessory[] = [];
 	public configureAccessory(accessory: PlatformAccessory): void {
@@ -89,6 +89,11 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 	private readonly offlineTimeoutMs = 30 * 60 * 1000;
 	private readonly pollIntervalMs = 60_000; // 60 seconds
+
+	private shouldExposeLightShows(): boolean {
+		const raw = this.config as Record<string, unknown>;
+		return raw.exposeLightShows === true;
+	}
 
 	private markDeviceSeen(deviceId: string): void {
 		this.deviceLastSeen.set(deviceId, Date.now());
@@ -489,6 +494,82 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						deviceName,
 						JSON.stringify(savedLightShowsCrcMap),
 					);
+				}
+
+				const lightShows = record.light_shows;
+
+				if (
+					this.shouldExposeLightShows() &&
+					Array.isArray(lightShows) &&
+					lightShows.length > 0
+				) {
+					for (const show of lightShows) {
+						const lightShow = show as Record<string, unknown>;
+						const showIndex = lightShow.index;
+						const showName =
+							typeof lightShow.name === 'string'
+								? lightShow.name
+								: `Light Show ${String(showIndex)}`;
+
+						if (typeof showIndex !== 'number') {
+							continue;
+						}
+
+						const lightShowName = `${deviceName} ${showName}`;
+						const lightShowUuidSeed = `cync-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
+						const lightShowUuid = this.api.hap.uuid.generate(lightShowUuidSeed);
+
+						let lightShowAccessory = this.accessories.find(
+							acc => acc.UUID === lightShowUuid,
+						);
+
+						if (lightShowAccessory) {
+							this.log.info(
+								'Cync: using cached light show accessory for %s (%s)',
+								lightShowName,
+								lightShowUuidSeed,
+							);
+						} else {
+							this.log.info(
+								'Cync: registering new light show accessory for %s (%s)',
+								lightShowName,
+								lightShowUuidSeed,
+							);
+
+							lightShowAccessory = new this.api.platformAccessory(
+								lightShowName,
+								lightShowUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[lightShowAccessory],
+							);
+
+							this.accessories.push(lightShowAccessory);
+						}
+
+						lightShowAccessory.context.device = device;
+						lightShowAccessory.context.lightShow = lightShow;
+						lightShowAccessory.context.parentDeviceId = deviceId;
+
+						configureCyncLightShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							lightShowAccessory,
+							lightShowName,
+							deviceId,
+							lightShow,
+							(showDeviceId, showIndex, crc) =>
+								this.client.activateLightShow(
+									showDeviceId,
+									showIndex,
+									crc,
+								),
+						);
+					}
 				}
 
 				const deviceTypeStr =

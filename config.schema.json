@@ -34,7 +34,31 @@
 				"title": "Expose Light Shows",
 				"type": "boolean",
 				"default": false,
-				"description": "Create optional HomeKit switches for saved Cync light shows discovered on supported RGBIC devices. Experimental."
+				"description": "Expose built-in Cync RGBIC Light Show switches for compatible devices."
+			},
+			"enabledLightShowIndexes": {
+				"title": "Enabled Light Shows",
+				"type": "array",
+				"items": {
+					"type": "number",
+					"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 65, 66, 67],
+					"enumNames": [
+						"Candle",
+						"Rainbow",
+						"Fireworks",
+						"Volcanic",
+						"Aurora",
+						"Happy Holidays",
+						"Red White Blue",
+						"Vegas",
+						"Party Time",
+						"Power Up",
+						"Splash",
+						"Cyber"
+					]
+				},
+				"uniqueItems": true,
+				"default": [2]
 			}
 		},
 		"required": [

@@ -4,6 +4,20 @@ import type { PlatformAccessory, CharacteristicValue } from 'homebridge';
 
 import type { CyncAccessoryEnv } from './cync-accessory-helpers.js';
 
+export const BUILT_IN_CYNC_LIGHT_SHOWS = [
+	{ index: 1, name: 'Candle' },
+	{ index: 2, name: 'Rainbow' },
+	{ index: 3, name: 'Fireworks' },
+	{ index: 4, name: 'Volcanic' },
+	{ index: 5, name: 'Aurora' },
+	{ index: 6, name: 'Happy Holidays' },
+	{ index: 7, name: 'Red White Blue' },
+	{ index: 8, name: 'Vegas' },
+	{ index: 9, name: 'Party Time' },
+	{ index: 65, name: 'Power Up' },
+	{ index: 67, name: 'Cyber' },
+] as const;
+
 export function configureCyncLightShowAccessory(
 	env: CyncAccessoryEnv,
 	_mesh: unknown,
@@ -20,6 +34,22 @@ export function configureCyncLightShowAccessory(
 ): void {
 	const Service = env.api.hap.Service;
 	const Characteristic = env.api.hap.Characteristic;
+
+	const showIndex =
+		typeof lightShow.index === 'number'
+			? lightShow.index
+			: undefined;
+
+	if (showIndex !== undefined) {
+		env.registerLightShowAccessoryForDevice?.(
+			deviceId,
+			accessory,
+			showIndex,
+		);
+	}
+
+	accessory.context.lightShowActive =
+		accessory.context.lightShowActive === true;
 
 	const service =
 		accessory.getService(Service.Switch) ??
@@ -50,16 +80,11 @@ export function configureCyncLightShowAccessory(
 
 	service
 		.getCharacteristic(Characteristic.On)
-		.onGet((): CharacteristicValue => false)
+		.onGet((): CharacteristicValue => {
+			return accessory.context.lightShowActive === true;
+		})
 		.onSet(async (value: CharacteristicValue): Promise<void> => {
-			if (value !== true) {
-				return;
-			}
-
-			const showIndex =
-				typeof lightShow.index === 'number'
-					? lightShow.index
-					: undefined;
+			const on = value === true;
 
 			const crc =
 				typeof lightShow.crc === 'number'
@@ -75,20 +100,33 @@ export function configureCyncLightShowAccessory(
 				return;
 			}
 
+			if (on) {
+				env.log.info(
+					'Cync Light Show requested: device=%s show=%s index=%d',
+					deviceId,
+					String(lightShow.name ?? 'Unknown'),
+					showIndex,
+				);
+
+				const activated = await activateLightShow(deviceId, showIndex, crc);
+
+				if (activated) {
+					env.markActiveLightShowForDevice?.(deviceId, showIndex);
+				}
+
+				return;
+			}
+
 			env.log.info(
-				'Cync Light Show requested: device=%s show=%s index=%d',
+				'Cync Light Show off requested: device=%s show=%s index=%d',
 				deviceId,
 				String(lightShow.name ?? 'Unknown'),
 				showIndex,
 			);
 
-			await activateLightShow(deviceId, showIndex, crc);
+			await env.tcpClient.exitLightShowMode(deviceId);
+			await env.tcpClient.setSwitchState(deviceId, { on: false });
 
-			setTimeout(() => {
-				service.updateCharacteristic(
-					Characteristic.On,
-					false,
-				);
-			}, 250);
+			env.markActiveLightShowForDevice?.(deviceId, null);
 		});
 }

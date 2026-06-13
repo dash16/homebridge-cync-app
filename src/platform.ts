@@ -24,7 +24,10 @@ import { configureCyncLightAccessory } from './cync/cync-light-accessory.js';
 import { configureCyncSwitchAccessory } from './cync/cync-switch-accessory.js';
 import { configureCyncOutletAccessory } from './cync/cync-outlet-accessory.js';
 import { configureCyncFanAccessory } from './cync/cync-fan-accessory.js';
-import { configureCyncLightShowAccessory } from './cync/cync-light-show-accessory.js';
+import {
+	BUILT_IN_CYNC_LIGHT_SHOWS,
+	configureCyncLightShowAccessory,
+} from './cync/cync-light-show-accessory.js';
 import { classifyCyncDevice } from './cync/device-classifier.js';
 
 const toCyncLogger = (log: Logger): CyncLogger => ({
@@ -33,6 +36,11 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 	warn: log.warn.bind(log),
 	error: log.error.bind(log),
 });
+
+const CYNC_LIGHT_SHOW_DEVICE_TYPES = new Set<number>([
+	76, // Outdoor 48" dynamic light strip
+	123, // Light strip
+]);
 
 function getDefaultCapabilitiesForDeviceType(): CyncCapabilityProfile {
 	const isLight = false;
@@ -90,15 +98,68 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private readonly offlineTimeoutMs = 30 * 60 * 1000;
 	private readonly pollIntervalMs = 60_000; // 60 seconds
 
+	private readonly lightShowServicesByDeviceId = new Map<string, Array<{
+		accessory: PlatformAccessory;
+		showIndex: number;
+	}>>();
+
 	private shouldExposeLightShows(): boolean {
 		const raw = this.config as Record<string, unknown>;
 		return raw.exposeLightShows === true;
+	}
+
+	private getEnabledLightShowIndexes(): Set<number> | null {
+		const raw = this.config as Record<string, unknown>;
+		const value = raw.enabledLightShowIndexes;
+
+		if (!Array.isArray(value)) {
+			return null;
+		}
+
+		return new Set(
+			value
+				.map(Number)
+				.filter((index) => Number.isFinite(index)),
+		);
 	}
 
 	private markDeviceSeen(deviceId: string): void {
 		this.deviceLastSeen.set(deviceId, Date.now());
 	}
 
+	private registerLightShowAccessoryForDevice(
+		deviceId: string,
+		accessory: PlatformAccessory,
+		showIndex: number,
+	): void {
+		const existing = this.lightShowServicesByDeviceId.get(deviceId) ?? [];
+
+		const withoutDuplicate = existing.filter(
+			entry => entry.accessory.UUID !== accessory.UUID,
+		);
+
+		withoutDuplicate.push({ accessory, showIndex });
+
+		this.lightShowServicesByDeviceId.set(deviceId, withoutDuplicate);
+	}
+
+	private markActiveLightShowForDevice(
+		deviceId: string,
+		activeShowIndex: number | null,
+	): void {
+		const entries = this.lightShowServicesByDeviceId.get(deviceId) ?? [];
+		const Characteristic = this.api.hap.Characteristic;
+		const Service = this.api.hap.Service;
+
+		for (const entry of entries) {
+			const active = activeShowIndex !== null && entry.showIndex === activeShowIndex;
+
+			entry.accessory.context.lightShowActive = active;
+
+			const service = entry.accessory.getService(Service.Switch);
+			service?.updateCharacteristic(Characteristic.On, active);
+		}
+	}
 	private isDeviceProbablyOffline(deviceId: string): boolean {
 		const last = this.deviceLastSeen.get(deviceId);
 		if (!last) {
@@ -106,6 +167,51 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			return false;
 		}
 		return Date.now() - last > this.offlineTimeoutMs;
+	}
+
+	private cleanupDisabledLightShowAccessoriesForDevice(
+		meshId: string,
+		deviceId: string,
+		enabledShowIndexes: Set<number>,
+	): void {
+		const expectedUuids = new Set(
+			[...enabledShowIndexes].map((showIndex) =>
+				this.api.hap.uuid.generate(`cync-lightshow-${meshId}-${deviceId}-${showIndex}`),
+			),
+		);
+
+		const staleAccessories = this.accessories.filter((accessory) => {
+			const ctx = accessory.context as Record<string, unknown>;
+
+			return (
+				ctx.parentDeviceId === deviceId &&
+				ctx.lightShow &&
+				!expectedUuids.has(accessory.UUID)
+			);
+		});
+
+		if (staleAccessories.length === 0) {
+			return;
+		}
+
+		this.log.info(
+			'Cync: removing %d disabled light show accessory/accessories for deviceId=%s',
+			staleAccessories.length,
+			deviceId,
+		);
+
+		this.api.unregisterPlatformAccessories(
+			'homebridge-cync-app',
+			'CyncAppPlatform',
+			staleAccessories,
+		);
+
+		for (const staleAccessory of staleAccessories) {
+			const index = this.accessories.indexOf(staleAccessory);
+			if (index >= 0) {
+				this.accessories.splice(index, 1);
+			}
+		}
 	}
 
 	private startPollingDevice(deviceId: string): void {
@@ -326,6 +432,8 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		  isDeviceProbablyOffline: this.isDeviceProbablyOffline.bind(this),
 		  markDeviceSeen: this.markDeviceSeen.bind(this),
 		  startPollingDevice: this.startPollingDevice.bind(this),
+		  registerLightShowAccessoryForDevice: this.registerLightShowAccessoryForDevice.bind(this),
+		  markActiveLightShowForDevice: this.markActiveLightShowForDevice.bind(this),
 		  registerAccessoryForDevice: (deviceId, accessory) => {
 				this.deviceIdToAccessory.set(deviceId, accessory);
 		  },
@@ -496,24 +604,22 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					);
 				}
 
-				const lightShows = record.light_shows;
+				const enabledLightShowIndexes = this.getEnabledLightShowIndexes();
+
+				const lightShows = BUILT_IN_CYNC_LIGHT_SHOWS.filter(
+					lightShow =>
+						enabledLightShowIndexes === null ||
+						enabledLightShowIndexes.has(lightShow.index),
+				);
 
 				if (
 					this.shouldExposeLightShows() &&
-					Array.isArray(lightShows) &&
-					lightShows.length > 0
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
 				) {
-					for (const show of lightShows) {
-						const lightShow = show as Record<string, unknown>;
+					for (const lightShow of lightShows) {
 						const showIndex = lightShow.index;
-						const showName =
-							typeof lightShow.name === 'string'
-								? lightShow.name
-								: `Light Show ${String(showIndex)}`;
-
-						if (typeof showIndex !== 'number') {
-							continue;
-						}
+						const showName = lightShow.name;
 
 						const lightShowName = `${deviceName} ${showName}`;
 						const lightShowUuidSeed = `cync-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
@@ -571,6 +677,19 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						);
 					}
 				}
+
+				const enabledLightShowIndexesForCleanup =
+					this.shouldExposeLightShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(lightShows.map((lightShow) => lightShow.index))
+						: new Set<number>();
+
+				this.cleanupDisabledLightShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledLightShowIndexesForCleanup,
+				);
 
 				const deviceTypeStr =
 					typeof deviceType === 'number' ? String(deviceType) : 'unknown';

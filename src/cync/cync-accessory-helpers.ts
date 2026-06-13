@@ -69,6 +69,16 @@ export interface CyncAccessoryEnv {
   markDeviceSeen(deviceId: string): void;
   startPollingDevice(deviceId: string): void;
   registerAccessoryForDevice(deviceId: string, accessory: PlatformAccessory): void;
+  registerLightShowAccessoryForDevice?: (
+  	deviceId: string,
+  	accessory: PlatformAccessory,
+  	showIndex: number,
+  ) => void;
+
+  markActiveLightShowForDevice?: (
+  	deviceId: string,
+  	activeShowIndex: number | null,
+  ) => void;
 }
 
 /**

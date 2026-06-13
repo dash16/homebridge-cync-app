@@ -831,14 +831,150 @@ export class TcpClient {
 		]);
 	}
 
-	private buildLightShowPacket(
+	private buildBlockedDeviceCommandBodies(
+		opcode: Buffer,
+		payload: Buffer,
+		blockSize: number,
+	): Array<{ blockIndex: number; commandBody: Buffer }> {
+		const chunkSize = blockSize - 1;
+		const payloadForChunking = Buffer.concat([Buffer.from([0x00]), payload]);
+
+		const chunks: Buffer[] = [];
+		for (let offset = 0; offset < payloadForChunking.length; offset += chunkSize) {
+			chunks.push(Buffer.from(payloadForChunking.subarray(offset, offset + chunkSize)));
+		}
+
+		if (chunks.length > 255) {
+			throw new Error(`Device command has too many chunks: ${chunks.length}`);
+		}
+
+		if (chunks.length > 0) {
+			chunks[0][0] = chunks.length;
+		}
+
+		return chunks.map((chunk, blockIndex) => Buffer.concat([
+			opcode,
+			Buffer.from([(blockIndex + 1) & 0xff]),
+			chunk,
+		])).map((commandBody, blockIndex) => ({ blockIndex, commandBody }));
+	}
+
+	private buildCyncTcpEnvelope(
+		controllerId: number,
+		seq: number,
+		xlinkFrame: Buffer,
+	): Buffer {
+		const header = Buffer.alloc(5);
+		header.writeUInt8(0x73, 0);
+		header.writeUInt32BE(4 + 2 + 1 + xlinkFrame.length, 1);
+
+		const controllerBytes = Buffer.alloc(4);
+		controllerBytes.writeUInt32BE(controllerId, 0);
+
+		const seqBytes = Buffer.alloc(2);
+		seqBytes.writeUInt16BE(seq, 0);
+
+		return Buffer.concat([
+			header,
+			controllerBytes,
+			seqBytes,
+			Buffer.from([0x00]),
+			xlinkFrame,
+		]);
+	}
+
+	private buildXlinkDeviceBlock(
+		commandType: number,
+		commandBody: Buffer,
+		blockIndex: number,
+		meshAddress: number,
+		messageId: number,
+	): Buffer {
+		const wrappedPayload = Buffer.alloc(7 + commandBody.length);
+
+		wrappedPayload.writeUIntLE(blockIndex & 0xffffff, 0, 3);
+		wrappedPayload.writeUInt16BE(0, 3);
+		wrappedPayload.writeUInt16LE(meshAddress & 0xffff, 5);
+		commandBody.copy(wrappedPayload, 7);
+
+		return this.buildXlinkFrame(
+			commandType,
+			wrappedPayload,
+			messageId,
+		);
+	}
+
+	private buildXlinkFrame(
+		commandType: number,
+		payload: Buffer,
+		messageId: number,
+	): Buffer {
+		const XLINK_CONSTANT = 0xf8;
+
+		const header = Buffer.alloc(8);
+		header.writeUInt32LE(messageId, 0);
+		header.writeUInt8(XLINK_CONSTANT, 4);
+		header.writeUInt8(commandType & 0xff, 5);
+		header.writeUInt16LE(payload.length, 6);
+
+		const checksumSeed = Buffer.concat([
+			Buffer.from([commandType & 0xff]),
+			header.subarray(6, 8),
+			payload,
+		]);
+
+		let checksum = 0;
+		for (const byte of checksumSeed) {
+			checksum = (checksum + byte) & 0xff;
+		}
+
+		const unescaped = Buffer.concat([
+			header,
+			payload,
+			Buffer.from([checksum]),
+		]);
+
+		const escaped: number[] = [];
+		for (const byte of unescaped) {
+			if (byte === 0x7d) {
+				escaped.push(0x7d, 0x5d);
+			} else if (byte === 0x7e) {
+				escaped.push(0x7d, 0x5e);
+			} else {
+				escaped.push(byte);
+			}
+		}
+
+		return Buffer.concat([
+			Buffer.from([0x7e]),
+			Buffer.from(escaped),
+			Buffer.from([0x7e]),
+		]);
+	}
+
+	private buildXlinkShowBlock(
+		commandBody: Buffer,
+		blockIndex: number,
+		meshAddress: number,
+		messageId: number,
+	): Buffer {
+		return this.buildXlinkDeviceBlock(
+			0x8e,
+			commandBody,
+			blockIndex,
+			meshAddress,
+			messageId,
+		);
+	}
+
+	private buildRunModePacket(
 		controllerId: number,
 		meshId: number,
-		showIndex: number,
-		crc: number | undefined,
+		mode: number,
+		index: number,
 		seq: number,
 	): Buffer {
-		const header = Buffer.from('730000001f', 'hex');
+		const header = Buffer.from('7300000020', 'hex');
 
 		const switchBytes = Buffer.alloc(4);
 		switchBytes.writeUInt32BE(controllerId, 0);
@@ -846,52 +982,51 @@ export class TcpClient {
 		const seqBytes = Buffer.alloc(2);
 		seqBytes.writeUInt16BE(seq, 0);
 
-		// EXPERIMENTAL: same LAN wrapper as power, with guessed light-show subtype.
-		const middle = Buffer.from('007e00000000f8f00d000000000000', 'hex');
-
 		const meshBytes = Buffer.alloc(2);
 		meshBytes.writeUInt16LE(meshId, 0);
 
-		const showByte = Math.max(0, Math.min(255, Math.round(showIndex)));
+		const modeByte = clampNumber(Math.round(mode), 0, 255);
+		const indexByte = clampNumber(Math.round(index), 0, 255);
+		const randomByte = Math.floor(Math.random() * 256);
 
-		const crcBytes = Buffer.alloc(4);
-		crcBytes.writeUInt32BE(
-			Number.isFinite(Number(crc)) ? Number(crc) : 0,
-			0,
-		);
-
-		// EXPERIMENTAL payload shape.
-		const tail = Buffer.concat([
-			Buffer.from([
-				0xf0,
-				0x00,
-				0x06,
-				showByte,
-			]),
-			crcBytes,
+		const command = Buffer.from([
+			0xe2, 0x11, 0x02, 0x07,
+			modeByte,
+			indexByte,
+			randomByte,
 		]);
 
-		const checksumSeed =
-			429 +
-			meshBytes[0] +
-			meshBytes[1] +
-			showByte +
-			crcBytes.reduce((sum, byte) => sum + byte, 0);
+		const xlinkPayload = Buffer.concat([
+			Buffer.from([
+				0x7e,
+				0x00, 0x00, 0x00, 0x00,
+				0xf8,
+				0xe2,
+				0x0e, 0x00,
+				0x00, 0x00, 0x00,
+				0x00, 0x00,
+			]),
+			meshBytes,
+			command,
+		]);
 
-		const checksum = Buffer.from([checksumSeed & 0xff]);
-		const end = Buffer.from('7e', 'hex');
-
-		void crcBytes;
+		let checksum = 0;
+		for (const byte of Buffer.concat([
+			Buffer.from([0xe2, 0x0e, 0x00]),
+			Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00]),
+			meshBytes,
+			command,
+		])) {
+			checksum = (checksum + byte) & 0xff;
+		}
 
 		return Buffer.concat([
 			header,
 			switchBytes,
 			seqBytes,
-			middle,
-			meshBytes,
-			tail,
-			checksum,
-			end,
+			Buffer.from([0x00]),
+			xlinkPayload,
+			Buffer.from([checksum, 0x7e]),
 		]);
 	}
 
@@ -1034,21 +1169,109 @@ export class TcpClient {
 				return false;
 			}
 
-			await this.sendWithControllerRetry(
+			const controllerId = this.resolvePrimaryControllerId(
 				deviceId,
-				record,
-				true,
-				(candidateControllerId, seq) => this.buildLightShowPacket(
-					candidateControllerId,
-					meshIndex,
-					showIndex,
-					crc,
-					seq,
-				),
-				'light show',
+				record.switch_controller,
 			);
 
-			return true;
+			if (controllerId === undefined) {
+				this.log.warn(
+					'[Cync TCP] activateLightShow: device %s missing controller (switch_controller=%o)',
+					deviceId,
+					record.switch_controller,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					1,
+					showIndex,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'light show');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Activated light show: device=%s showIndex=%d controller=0x%s seq=%d',
+					deviceId,
+					showIndex,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
+		});
+	}
+
+	public async exitLightShowMode(deviceId: string): Promise<boolean> {
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] exitLightShowMode: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn('[Cync TCP] exitLightShowMode: socket not ready.');
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] exitLightShowMode: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+			const controllerId = this.resolvePrimaryControllerId(deviceId, record.switch_controller);
+
+			if (controllerId === undefined || !Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] exitLightShowMode: device %s missing LAN fields',
+					deviceId,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					0,
+					0,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'light show exit');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Exited light show mode: device=%s controller=0x%s seq=%d',
+					deviceId,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
 		});
 	}
 

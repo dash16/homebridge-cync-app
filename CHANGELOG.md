@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.6
+**Release Date:** 2026-06-13
+
+### Added
+- Added brightness control support for supported Cync switch devices.
+- Added cached brightness restore behavior for Cync paddle dimmer switches.
+
+### Fixed
+- Fixed Cync paddle dimmer switches returning to 100% brightness after being turned off and back on from HomeKit.
+
 ## v0.4.5
 
 **Release Date:** 2026-06-10

@@ -40,6 +40,10 @@ const CYNC_SWITCH_DEVICE_TYPES = new Set([
 	125,
 ]);
 
+const CYNC_DIMMABLE_SWITCH_DEVICE_TYPES = new Set([
+	125,
+]);
+
 const CYNC_IGNORED_DEVICE_TYPES = new Set([
 	115,
 ]);
@@ -120,18 +124,20 @@ export function classifyCyncDevice(
 		};
 	}
 
-	if (deviceType !== undefined && CYNC_OUTLET_DEVICE_TYPES.has(deviceType)) {
+	if (deviceType !== undefined && CYNC_SWITCH_DEVICE_TYPES.has(deviceType)) {
 		return {
-			accessoryType: 'outlet',
+			accessoryType: 'switch',
 			deviceType,
-			capabilities,
+			capabilities: CYNC_DIMMABLE_SWITCH_DEVICE_TYPES.has(deviceType)
+				? [...capabilities, 'brightness']
+				: capabilities,
 			reason: `deviceType: ${deviceType}`,
 		};
 	}
 
-	if (deviceType !== undefined && CYNC_SWITCH_DEVICE_TYPES.has(deviceType)) {
+	if (deviceType !== undefined && CYNC_OUTLET_DEVICE_TYPES.has(deviceType)) {
 		return {
-			accessoryType: 'switch',
+			accessoryType: 'outlet',
 			deviceType,
 			capabilities,
 			reason: `deviceType: ${deviceType}`,

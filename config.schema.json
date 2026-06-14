@@ -41,7 +41,7 @@
 				"type": "array",
 				"items": {
 					"type": "number",
-					"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 65, 66, 67],
+					"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 65, 67],
 					"enumNames": [
 						"Candle",
 						"Rainbow",
@@ -53,12 +53,37 @@
 						"Vegas",
 						"Party Time",
 						"Power Up",
-						"Splash",
 						"Cyber"
 					]
 				},
 				"uniqueItems": true,
 				"default": [2]
+			},
+			"exposeMusicShows": {
+				"title": "Expose Music Shows",
+				"type": "boolean",
+				"default": false,
+				"description": "Expose built-in Cync RGBIC Music Show switches for compatible devices."
+			},
+			"enabledMusicShowIndexes": {
+				"title": "Enabled Music Shows",
+				"type": "array",
+				"items": {
+					"type": "number",
+					"enum": [1, 2, 3, 4, 5, 6, 7, 8],
+					"enumNames": [
+						"Midnight",
+						"Earth Tones",
+						"Heat Wave",
+						"Solar Flare",
+						"Breeze",
+						"Tropical",
+						"Spectrum",
+						"Supernova"
+					]
+				},
+				"uniqueItems": true,
+				"default": [1]
 			}
 		},
 		"required": [

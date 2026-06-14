@@ -1274,6 +1274,151 @@ export class TcpClient {
 			return false;
 		});
 	}
+	public async activateMusicShow(
+		deviceId: string,
+		showIndex: number,
+		crc?: number,
+	): Promise<boolean> {
+		void crc;
+
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] activateMusicShow: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn(
+					'[Cync TCP] activateMusicShow: socket not ready even after reconnect attempt.',
+				);
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] activateMusicShow: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+
+			if (!Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] activateMusicShow: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
+					deviceId,
+					record.switch_controller,
+					record.mesh_id,
+				);
+				return false;
+			}
+
+			const controllerId = this.resolvePrimaryControllerId(
+				deviceId,
+				record.switch_controller,
+			);
+
+			if (controllerId === undefined) {
+				this.log.warn(
+					'[Cync TCP] activateMusicShow: device %s missing controller (switch_controller=%o)',
+					deviceId,
+					record.switch_controller,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					2,
+					showIndex,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'music show');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Activated music show: device=%s showIndex=%d controller=0x%s seq=%d',
+					deviceId,
+					showIndex,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
+		});
+	}
+
+	public async exitMusicShowMode(deviceId: string): Promise<boolean> {
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] exitMusicShowMode: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn('[Cync TCP] exitMusicShowMode: socket not ready.');
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] exitMusicShowMode: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+			const controllerId = this.resolvePrimaryControllerId(deviceId, record.switch_controller);
+
+			if (controllerId === undefined || !Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] exitMusicShowMode: device %s missing LAN fields',
+					deviceId,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					0,
+					0,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'music show exit');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Exited music show mode: device=%s controller=0x%s seq=%d',
+					deviceId,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
+		});
+	}
 
 	// Mesh State Response Parser: decodes the paginated 0x52 response into per-device updates.
 	//

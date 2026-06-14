@@ -845,6 +845,14 @@ export class CyncClient {
 		return this.tcpClient.activateLightShow(deviceId, showIndex, crc);
 	}
 
+	public async activateMusicShow(
+		deviceId: string,
+		showIndex: number,
+		crc?: number,
+	): Promise<boolean> {
+		return this.tcpClient.activateMusicShow(deviceId, showIndex, crc);
+	}
+
 	public async startTransport(
 		config: CyncCloudConfig,
 		loginCode: Uint8Array,

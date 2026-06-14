@@ -123,6 +123,11 @@ export function configureCyncLightAccessory(
 
 			try {
 				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on });
+
+				if (!on) {
+					env.clearActiveShowsForDevice?.(cyncMeta.deviceId);
+				}
+
 				env.markDeviceSeen(cyncMeta.deviceId);
 			} catch (err) {
 				env.log.warn(

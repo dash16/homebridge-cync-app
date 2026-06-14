@@ -69,6 +69,7 @@ export interface CyncAccessoryEnv {
   markDeviceSeen(deviceId: string): void;
   startPollingDevice(deviceId: string): void;
   registerAccessoryForDevice(deviceId: string, accessory: PlatformAccessory): void;
+
   registerLightShowAccessoryForDevice?: (
   	deviceId: string,
   	accessory: PlatformAccessory,
@@ -78,6 +79,21 @@ export interface CyncAccessoryEnv {
   markActiveLightShowForDevice?: (
   	deviceId: string,
   	activeShowIndex: number | null,
+  ) => void;
+
+  registerMusicShowAccessoryForDevice?: (
+  	deviceId: string,
+  	accessory: PlatformAccessory,
+  	showIndex: number,
+  ) => void;
+
+  markActiveMusicShowForDevice?: (
+  	deviceId: string,
+  	activeShowIndex: number | null,
+  ) => void;
+
+  clearActiveShowsForDevice?: (
+  	deviceId: string,
   ) => void;
 }
 

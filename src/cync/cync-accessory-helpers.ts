@@ -95,6 +95,12 @@ export interface CyncAccessoryEnv {
   clearActiveShowsForDevice?: (
   	deviceId: string,
   ) => void;
+
+  setMainAccessoryOnForDevice?: (
+  	deviceId: string,
+  	on: boolean,
+  ) => void;
+
 }
 
 /**

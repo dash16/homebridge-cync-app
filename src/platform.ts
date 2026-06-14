@@ -102,9 +102,31 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private readonly offlineTimeoutMs = 30 * 60 * 1000;
 	private readonly pollIntervalMs = 60_000; // 60 seconds
 
+	private setMainAccessoryOnForDevice(deviceId: string, on: boolean): void {
+		const accessory = this.deviceIdToAccessory.get(deviceId);
+		if (!accessory) {
+			return;
+		}
+
+		const Service = this.api.hap.Service;
+		const Characteristic = this.api.hap.Characteristic;
+
+		const service =
+			accessory.getService(Service.Lightbulb) ??
+			accessory.getService(Service.Outlet) ??
+			accessory.getService(Service.Switch);
+
+		service?.updateCharacteristic(Characteristic.On, on);
+	}
+
 	private clearActiveShowsForDevice(deviceId: string): void {
 		this.markActiveLightShowForDevice(deviceId, null);
 		this.markActiveMusicShowForDevice(deviceId, null);
+	}
+
+	private shouldExposeCustomShows(): boolean {
+		const raw = this.config as Record<string, unknown>;
+		return raw.exposeCustomShows === true;
 	}
 
 	private readonly musicShowServicesByDeviceId = new Map<string, Array<{
@@ -258,6 +280,96 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		return Date.now() - last > this.offlineTimeoutMs;
 	}
 
+	private cleanupDisabledCustomLightShowAccessoriesForDevice(
+		meshId: string,
+		deviceId: string,
+		enabledShowIndexes: Set<number>,
+	): void {
+		const expectedUuids = new Set(
+			[...enabledShowIndexes].map((showIndex) =>
+				this.api.hap.uuid.generate(`cync-custom-lightshow-${meshId}-${deviceId}-${showIndex}`),
+			),
+		);
+
+		const staleAccessories = this.accessories.filter((accessory) => {
+			const ctx = accessory.context as Record<string, unknown>;
+
+			return (
+				ctx.parentDeviceId === deviceId &&
+				ctx.showKind === 'custom-light' &&
+				!expectedUuids.has(accessory.UUID)
+			);
+		});
+
+		if (staleAccessories.length === 0) {
+			return;
+		}
+
+		this.log.info(
+			'Cync: removing %d disabled custom light show accessory/accessories for deviceId=%s',
+			staleAccessories.length,
+			deviceId,
+		);
+
+		this.api.unregisterPlatformAccessories(
+			'homebridge-cync-app',
+			'CyncAppPlatform',
+			staleAccessories,
+		);
+
+		for (const staleAccessory of staleAccessories) {
+			const index = this.accessories.indexOf(staleAccessory);
+			if (index >= 0) {
+				this.accessories.splice(index, 1);
+			}
+		}
+	}
+
+	private cleanupDisabledCustomMusicShowAccessoriesForDevice(
+		meshId: string,
+		deviceId: string,
+		enabledShowIndexes: Set<number>,
+	): void {
+		const expectedUuids = new Set(
+			[...enabledShowIndexes].map((showIndex) =>
+				this.api.hap.uuid.generate(`cync-custom-musicshow-${meshId}-${deviceId}-${showIndex}`),
+			),
+		);
+
+		const staleAccessories = this.accessories.filter((accessory) => {
+			const ctx = accessory.context as Record<string, unknown>;
+
+			return (
+				ctx.parentDeviceId === deviceId &&
+				ctx.showKind === 'custom-music' &&
+				!expectedUuids.has(accessory.UUID)
+			);
+		});
+
+		if (staleAccessories.length === 0) {
+			return;
+		}
+
+		this.log.info(
+			'Cync: removing %d disabled custom music show accessory/accessories for deviceId=%s',
+			staleAccessories.length,
+			deviceId,
+		);
+
+		this.api.unregisterPlatformAccessories(
+			'homebridge-cync-app',
+			'CyncAppPlatform',
+			staleAccessories,
+		);
+
+		for (const staleAccessory of staleAccessories) {
+			const index = this.accessories.indexOf(staleAccessory);
+			if (index >= 0) {
+				this.accessories.splice(index, 1);
+			}
+		}
+	}
+
 	private cleanupDisabledLightShowAccessoriesForDevice(
 		meshId: string,
 		deviceId: string,
@@ -274,7 +386,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 			return (
 				ctx.parentDeviceId === deviceId &&
-				ctx.lightShow &&
+				ctx.showKind === 'built-in-light' &&
 				!expectedUuids.has(accessory.UUID)
 			);
 		});
@@ -319,7 +431,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 			return (
 				ctx.parentDeviceId === deviceId &&
-				ctx.musicShow !== undefined &&
+				ctx.showKind === 'built-in-music' &&
 				!expectedUuids.has(accessory.UUID)
 			);
 		});
@@ -570,6 +682,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		  registerMusicShowAccessoryForDevice: this.registerMusicShowAccessoryForDevice.bind(this),
 		  markActiveMusicShowForDevice: this.markActiveMusicShowForDevice.bind(this),
 		  markActiveLightShowForDevice: this.markActiveLightShowForDevice.bind(this),
+		  setMainAccessoryOnForDevice: this.setMainAccessoryOnForDevice.bind(this),
 		  clearActiveShowsForDevice: this.clearActiveShowsForDevice.bind(this),
 		  registerAccessoryForDevice: (deviceId, accessory) => {
 				this.deviceIdToAccessory.set(deviceId, accessory);
@@ -723,10 +836,13 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					}, null, 2),
 				);
 
+
 				const rawDevice =
 					record.raw && typeof record.raw === 'object'
 						? record.raw as Record<string, unknown>
 						: undefined;
+
+				const meshRecord = mesh as unknown as Record<string, unknown>;
 
 				const savedLightShowsCrcMap = rawDevice?.savedLightShowsCrcMap;
 
@@ -735,11 +851,74 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					typeof savedLightShowsCrcMap === 'object'
 				) {
 					this.log.debug(
-						'Cync RGBIC candidate: %s has savedLightShowsCrcMap=%s',
+						'Cync RGBIC savedLightShowsCrcMap for %s: %s',
 						deviceName,
 						JSON.stringify(savedLightShowsCrcMap),
 					);
+
+					this.log.debug(
+						'Cync RGBIC raw device keys for %s: %s',
+						deviceName,
+						JSON.stringify(Object.keys(rawDevice ?? {}).sort()),
+					);
 				}
+
+				const savedShowCrcMap =
+					savedLightShowsCrcMap &&
+					typeof savedLightShowsCrcMap === 'object'
+						? savedLightShowsCrcMap as Record<string, unknown>
+						: {};
+
+				const customLightShows = Array.isArray(meshRecord.lightShows)
+					? meshRecord.lightShows
+						.map((show) => show as Record<string, unknown>)
+						.filter((show) =>
+							typeof show.index === 'number' &&
+							typeof show.name === 'string' &&
+							typeof savedShowCrcMap[String(show.index)] === 'number',
+						)
+						.map((show) => ({
+							index: show.index as number,
+							name: show.name as string,
+							crc: savedShowCrcMap[String(show.index)] as number,
+						}))
+					: [];
+
+				const customMusicShows = Array.isArray(meshRecord.musicShows)
+					? meshRecord.musicShows
+						.map((show) => show as Record<string, unknown>)
+						.filter((show) =>
+							typeof show.index === 'number' &&
+							typeof show.name === 'string' &&
+							typeof savedShowCrcMap[String(show.index)] === 'number',
+						)
+						.map((show) => ({
+							index: show.index as number,
+							name: show.name as string,
+							crc: savedShowCrcMap[String(show.index)] as number,
+						}))
+					: [];
+
+				this.log.debug(
+					'Cync RGBIC mesh keys for %s: %s',
+					deviceName,
+					JSON.stringify(Object.keys(meshRecord).sort()),
+				);
+
+				this.log.debug(
+					'Cync RGBIC mesh lightShows for %s: %s',
+					deviceName,
+					JSON.stringify(meshRecord.lightShows),
+				);
+
+				this.log.debug(
+					'Cync custom show discovery for %s: expose=%s light=%d music=%d crcKeys=%s',
+					deviceName,
+					String(this.shouldExposeCustomShows()),
+					customLightShows.length,
+					customMusicShows.length,
+					JSON.stringify(Object.keys(savedShowCrcMap)),
+				);
 
 				const enabledLightShowIndexes = this.getEnabledLightShowIndexes();
 
@@ -758,7 +937,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						const showIndex = lightShow.index;
 						const showName = lightShow.name;
 
-						const lightShowName = `${deviceName} Light Show ${showName}`;
+						const lightShowName = `${showName} (${deviceName} Light)`;
 						const lightShowUuidSeed = `cync-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
 						const lightShowUuid = this.api.hap.uuid.generate(lightShowUuidSeed);
 
@@ -796,6 +975,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						lightShowAccessory.context.device = device;
 						lightShowAccessory.context.lightShow = lightShow;
 						lightShowAccessory.context.parentDeviceId = deviceId;
+						lightShowAccessory.context.showKind = 'built-in-light';
 
 						configureCyncLightShowAccessory(
 							this.accessoryEnv,
@@ -832,7 +1012,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						const showIndex = musicShow.index;
 						const showName = musicShow.name;
 
-						const musicShowName = `${deviceName} Music Show ${showName}`;
+						const musicShowName = `${showName} (${deviceName} Music)`;
 						const musicShowUuidSeed = `cync-musicshow-${mesh.id}-${deviceId}-${showIndex}`;
 						const musicShowUuid = this.api.hap.uuid.generate(musicShowUuidSeed);
 
@@ -870,6 +1050,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						musicShowAccessory.context.device = device;
 						musicShowAccessory.context.musicShow = musicShow;
 						musicShowAccessory.context.parentDeviceId = deviceId;
+						musicShowAccessory.context.showKind = 'built-in-music';
 
 						configureCyncMusicShowAccessory(
 							this.accessoryEnv,
@@ -885,6 +1066,103 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 									showIndex,
 									crc,
 								),
+						);
+					}
+				}
+
+				if (
+					this.shouldExposeCustomShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+				) {
+					for (const customLightShow of customLightShows) {
+						const showIndex = customLightShow.index;
+						const showName = customLightShow.name;
+
+						const customLightShowName = `${showName} (${deviceName} Custom Light)`;
+						const customLightShowUuidSeed = `cync-custom-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
+						const customLightShowUuid = this.api.hap.uuid.generate(customLightShowUuidSeed);
+
+						let customLightShowAccessory = this.accessories.find(
+							acc => acc.UUID === customLightShowUuid,
+						);
+
+						if (!customLightShowAccessory) {
+							customLightShowAccessory = new this.api.platformAccessory(
+								customLightShowName,
+								customLightShowUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[customLightShowAccessory],
+							);
+
+							this.accessories.push(customLightShowAccessory);
+						}
+
+						customLightShowAccessory.context.device = device;
+						customLightShowAccessory.context.lightShow = customLightShow;
+						customLightShowAccessory.context.parentDeviceId = deviceId;
+						customLightShowAccessory.context.showKind = 'custom-light';
+
+
+						configureCyncLightShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							customLightShowAccessory,
+							customLightShowName,
+							deviceId,
+							customLightShow,
+							(showDeviceId, showIndex, crc) =>
+								this.client.activateLightShow(showDeviceId, showIndex, crc),
+						);
+					}
+
+					for (const customMusicShow of customMusicShows) {
+						const showIndex = customMusicShow.index;
+						const showName = customMusicShow.name;
+
+						const customMusicShowName = `${showName} (${deviceName} Custom Music)`;
+						const customMusicShowUuidSeed = `cync-custom-musicshow-${mesh.id}-${deviceId}-${showIndex}`;
+						const customMusicShowUuid = this.api.hap.uuid.generate(customMusicShowUuidSeed);
+
+						let customMusicShowAccessory = this.accessories.find(
+							acc => acc.UUID === customMusicShowUuid,
+						);
+
+						if (!customMusicShowAccessory) {
+							customMusicShowAccessory = new this.api.platformAccessory(
+								customMusicShowName,
+								customMusicShowUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[customMusicShowAccessory],
+							);
+
+							this.accessories.push(customMusicShowAccessory);
+						}
+
+						customMusicShowAccessory.context.device = device;
+						customMusicShowAccessory.context.musicShow = customMusicShow;
+						customMusicShowAccessory.context.parentDeviceId = deviceId;
+						customMusicShowAccessory.context.showKind = 'custom-music';
+
+						configureCyncMusicShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							customMusicShowAccessory,
+							customMusicShowName,
+							deviceId,
+							customMusicShow,
+							(showDeviceId, showIndex, crc) =>
+								this.client.activateMusicShow(showDeviceId, showIndex, crc),
 						);
 					}
 				}
@@ -913,6 +1191,32 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					String(mesh.id),
 					deviceId,
 					enabledMusicShowIndexesForCleanup,
+				);
+
+				const enabledCustomLightShowIndexesForCleanup =
+					this.shouldExposeCustomShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(customLightShows.map((customLightShow) => customLightShow.index))
+						: new Set<number>();
+
+				this.cleanupDisabledCustomLightShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledCustomLightShowIndexesForCleanup,
+				);
+
+				const enabledCustomMusicShowIndexesForCleanup =
+					this.shouldExposeCustomShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(customMusicShows.map((customMusicShow) => customMusicShow.index))
+						: new Set<number>();
+
+				this.cleanupDisabledCustomMusicShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledCustomMusicShowIndexesForCleanup,
 				);
 
 				const deviceTypeStr =

@@ -637,11 +637,22 @@ export class CyncClient {
 
 				const propsRecord = props as Record<string, unknown>;
 
+				(mesh as Record<string, unknown>).rawProperties = propsRecord;
+				(mesh as Record<string, unknown>).lightShows = propsRecord.lightShows;
+				(mesh as Record<string, unknown>).sceneArray = propsRecord.sceneArray;
+				(mesh as Record<string, unknown>).musicShows = propsRecord.musicShows;
+
+				this.log.debug(
+					'CyncClient: mesh %s properties keys=%s',
+					meshName,
+					JSON.stringify(Object.keys(propsRecord).sort()),
+				);
+
 				if (propsRecord.sceneArray !== undefined) {
 					this.log.debug(
 						'CyncClient: mesh %s sceneArray=%s',
 						meshName,
-						JSON.stringify(propsRecord.sceneArray, null, 2),
+						JSON.stringify(propsRecord.sceneArray),
 					);
 				}
 
@@ -649,7 +660,15 @@ export class CyncClient {
 					this.log.debug(
 						'CyncClient: mesh %s lightShows=%s',
 						meshName,
-						JSON.stringify(propsRecord.lightShows, null, 2),
+						JSON.stringify(propsRecord.lightShows),
+					);
+				}
+
+				if (propsRecord.musicShows !== undefined) {
+					this.log.debug(
+						'CyncClient: mesh %s musicShows=%s',
+						meshName,
+						JSON.stringify(propsRecord.musicShows),
 					);
 				}
 
@@ -842,7 +861,7 @@ export class CyncClient {
 		showIndex: number,
 		crc?: number,
 	): Promise<boolean> {
-		return this.tcpClient.activateLightShow(deviceId, showIndex, crc);
+		return this.tcpClient.activateLightShow(deviceId, showIndex);
 	}
 
 	public async activateMusicShow(
@@ -850,7 +869,7 @@ export class CyncClient {
 		showIndex: number,
 		crc?: number,
 	): Promise<boolean> {
-		return this.tcpClient.activateMusicShow(deviceId, showIndex, crc);
+		return this.tcpClient.activateMusicShow(deviceId, showIndex);
 	}
 
 	public async startTransport(

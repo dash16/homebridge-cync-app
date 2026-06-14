@@ -1134,7 +1134,6 @@ export class TcpClient {
 	public async activateLightShow(
 		deviceId: string,
 		showIndex: number,
-		crc?: number,
 	): Promise<boolean> {
 		return this.enqueueCommand(async () => {
 			if (!this.config) {
@@ -1277,9 +1276,7 @@ export class TcpClient {
 	public async activateMusicShow(
 		deviceId: string,
 		showIndex: number,
-		crc?: number,
 	): Promise<boolean> {
-		void crc;
 
 		return this.enqueueCommand(async () => {
 			if (!this.config) {

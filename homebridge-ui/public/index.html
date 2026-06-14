@@ -51,8 +51,18 @@
 
 <div class="card mb-3">
 	<div class="card-body">
-		<h5 class="card-title">Experimental Features</h5>
+		<h5 class="card-title">Cync Shows</h5>
 
+		<div class="form-check mt-3">
+			<input type="checkbox" id="cyncExposeCustomShows" class="form-check-input">
+			<label for="cyncExposeCustomShows" class="form-check-label">
+				Expose saved Custom Shows as HomeKit switches
+			</label>
+		</div>
+
+		<p class="text-muted mt-2">
+			Saved Custom Shows created in the Cync app can be exposed as separate HomeKit switches.
+		</p>
 		<div class="form-check">
 			<input type="checkbox" id="cyncExposeLightShows" class="form-check-input">
 			<label for="cyncExposeLightShows" class="form-check-label">
@@ -129,6 +139,15 @@ homebridge.addEventListener('ready', async () => {
 	let pluginConfig = await homebridge.getPluginConfig();
 	let cfg = pluginConfig[0] || {};
 
+	const exposeCustomShowsInput = document.getElementById('cyncExposeCustomShows');
+		exposeCustomShowsInput.checked = cfg.exposeCustomShows === true;
+
+		exposeCustomShowsInput.addEventListener('change', async () => {
+			await updateConfig({
+				exposeCustomShows: exposeCustomShowsInput.checked,
+			});
+			statusEl.textContent = 'Setting updated. Click Save.';
+		});
 
 	exposeLightShowsInput.checked = cfg.exposeLightShows === true;
 
@@ -179,7 +198,7 @@ homebridge.addEventListener('ready', async () => {
 		await updateConfig({
 			exposeLightShows: exposeLightShowsInput.checked,
 		});
-		statusEl.textContent = 'Experimental feature setting updated. Click Save.';
+		statusEl.textContent = 'Setting updated. Click Save.';
 	});
 
 	exposeMusicShowsInput.checked = cfg.exposeMusicShows === true;
@@ -231,7 +250,7 @@ homebridge.addEventListener('ready', async () => {
 		await updateConfig({
 			exposeMusicShows: exposeMusicShowsInput.checked,
 		});
-		statusEl.textContent = 'Experimental feature setting updated. Click Save.';
+		statusEl.textContent = 'Setting updated. Click Save.';
 	});
 
 	// Helper to update in-memory pluginConfig (persisted when user clicks Save in HB)

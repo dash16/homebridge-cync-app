@@ -109,6 +109,7 @@ export function configureCyncMusicShowAccessory(
 
 				if (activated) {
 					env.markActiveMusicShowForDevice?.(deviceId, showIndex);
+					env.setMainAccessoryOnForDevice?.(deviceId, true);
 				}
 
 				return;

@@ -112,6 +112,7 @@ export function configureCyncLightShowAccessory(
 
 				if (activated) {
 					env.markActiveLightShowForDevice?.(deviceId, showIndex);
+					env.setMainAccessoryOnForDevice?.(deviceId, true);
 				}
 
 				return;

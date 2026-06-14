@@ -30,6 +30,12 @@
 				"pattern": "^[0-9]{6}$",
 				"description": "Temporary 6-digit code emailed by Cync when you sign in. Leave blank normally; only needed when performing a fresh login."
 			},
+			"exposeCustomShows": {
+				"title": "Expose Custom Shows",
+				"type": "boolean",
+				"default": false,
+				"description": "Expose saved Cync RGBIC Custom Show switches for compatible devices."
+			},
 			"exposeLightShows": {
 				"title": "Expose Light Shows",
 				"type": "boolean",

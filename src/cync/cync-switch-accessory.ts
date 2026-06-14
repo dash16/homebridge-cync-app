@@ -12,13 +12,11 @@ export function configureCyncSwitchAccessory(
 	deviceName: string,
 	deviceId: string,
 ): void {
-	const { Characteristic, Service } = env.api.hap;
-
 	const service =
-		accessory.getService(Service.Switch) ||
-		accessory.addService(Service.Switch, deviceName);
+		accessory.getService(env.api.hap.Service.Switch) ||
+		accessory.addService(env.api.hap.Service.Switch, deviceName);
 
-	const existingLight = accessory.getService(Service.Lightbulb);
+	const existingLight = accessory.getService(env.api.hap.Service.Lightbulb);
 	if (existingLight) {
 		env.log.info(
 			'Cync: removing stale Lightbulb service from %s (deviceId=%s) before configuring as Switch',
@@ -28,19 +26,9 @@ export function configureCyncSwitchAccessory(
 		accessory.removeService(existingLight);
 	}
 
-	const deviceRecord = device as unknown as Record<string, unknown>;
-
-	const deviceType =
-		typeof deviceRecord.deviceType === 'number'
-			? deviceRecord.deviceType
-			: typeof deviceRecord.type === 'number'
-				? deviceRecord.type
-				: undefined;
-
-	const supportsBrightness = deviceType === 125;
-
 	applyAccessoryInformationFromCyncDevice(env.api, accessory, device, deviceName, deviceId);
 
+	// Ensure context is initialized
 	const ctx = accessory.context as CyncAccessoryContext;
 	ctx.cync = ctx.cync ?? {
 		meshId: mesh.id,
@@ -49,14 +37,13 @@ export function configureCyncSwitchAccessory(
 		on: false,
 	};
 
-	ctx.cync.deviceType = deviceType;
-
+	// Remember mapping for LAN updates
 	env.registerAccessoryForDevice(deviceId, accessory);
 	env.markDeviceSeen(deviceId);
 	env.startPollingDevice(deviceId);
 
 	service
-		.getCharacteristic(Characteristic.On)
+		.getCharacteristic(env.api.hap.Characteristic.On)
 		.onGet(() => {
 			const currentOn = !!ctx.cync?.on;
 
@@ -71,7 +58,7 @@ export function configureCyncSwitchAccessory(
 			}
 
 			env.log.info(
-				'Cync: Switch On.get -> %s for %s (deviceId=%s)',
+				'Cync: On.get -> %s for %s (deviceId=%s)',
 				String(currentOn),
 				deviceName,
 				deviceId,
@@ -99,6 +86,7 @@ export function configureCyncSwitchAccessory(
 				cyncMeta.deviceId,
 			);
 
+			// Optimistic cache
 			cyncMeta.on = on;
 
 			try {
@@ -109,26 +97,6 @@ export function configureCyncSwitchAccessory(
 				}
 
 				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on: true });
-
-				if (
-					supportsBrightness &&
-					typeof cyncMeta.brightness === 'number' &&
-					cyncMeta.brightness > 0 &&
-					cyncMeta.brightness < 100
-				) {
-					env.log.debug(
-						'Cync: Switch On.set restoring brightness=%d for %s (deviceId=%s)',
-						cyncMeta.brightness,
-						deviceName,
-						cyncMeta.deviceId,
-					);
-
-					await env.tcpClient.setBrightness(
-						cyncMeta.deviceId,
-						cyncMeta.brightness,
-						cyncMeta.deviceType,
-					);
-				}
 
 				env.markDeviceSeen(cyncMeta.deviceId);
 			} catch (err) {
@@ -144,82 +112,4 @@ export function configureCyncSwitchAccessory(
 				);
 			}
 		});
-
-	if (supportsBrightness) {
-		service
-			.getCharacteristic(Characteristic.Brightness)
-			.onGet(() => {
-				const current = ctx.cync?.brightness;
-
-				const cachedBrightness =
-					typeof current === 'number'
-						? current
-						: (ctx.cync?.on ?? false) ? 100 : 0;
-
-				if (env.isDeviceProbablyOffline(deviceId)) {
-					env.log.debug(
-						'Cync: Switch Brightness.get offline-heuristic hit; returning cached=%d for %s (deviceId=%s)',
-						cachedBrightness,
-						deviceName,
-						deviceId,
-					);
-				}
-
-				return cachedBrightness;
-			})
-			.onSet(async (value) => {
-				const cyncMeta = ctx.cync;
-
-				if (!cyncMeta?.deviceId) {
-					env.log.warn(
-						'Cync: Switch Brightness.set called for %s but no cync.deviceId in context',
-						deviceName,
-					);
-					return;
-				}
-
-				const brightness = Math.max(0, Math.min(100, Number(value)));
-
-				if (!Number.isFinite(brightness)) {
-					env.log.warn(
-						'Cync: Switch Brightness.set received invalid value=%o for %s (deviceId=%s)',
-						value,
-						deviceName,
-						cyncMeta.deviceId,
-					);
-					return;
-				}
-
-				cyncMeta.brightness = brightness;
-				cyncMeta.on = brightness > 0;
-
-				env.log.info(
-					'Cync: Switch Brightness.set -> %d for %s (deviceId=%s)',
-					brightness,
-					deviceName,
-					cyncMeta.deviceId,
-				);
-
-				try {
-					await env.tcpClient.setBrightness(
-						cyncMeta.deviceId,
-						brightness,
-						cyncMeta.deviceType,
-					);
-
-					env.markDeviceSeen(cyncMeta.deviceId);
-				} catch (err) {
-					env.log.warn(
-						'Cync: Switch Brightness.set failed for %s (deviceId=%s): %s',
-						deviceName,
-						cyncMeta.deviceId,
-						(err as Error).message ?? String(err),
-					);
-
-					throw new env.api.hap.HapStatusError(
-						env.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-					);
-				}
-			});
-	}
 }

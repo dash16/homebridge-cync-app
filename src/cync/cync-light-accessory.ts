@@ -123,6 +123,32 @@ export function configureCyncLightAccessory(
 
 			try {
 				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on });
+
+				if (
+					on &&
+					cyncMeta.deviceType === 125 &&
+					typeof cyncMeta.brightness === 'number' &&
+					cyncMeta.brightness > 0 &&
+					cyncMeta.brightness < 100
+				) {
+					env.log.debug(
+						'Cync: Light On.set restoring brightness=%d for %s (deviceId=%s)',
+						cyncMeta.brightness,
+						deviceName,
+						cyncMeta.deviceId,
+					);
+
+					await env.tcpClient.setBrightness(
+						cyncMeta.deviceId,
+						cyncMeta.brightness,
+						cyncMeta.deviceType,
+						{
+							colorActive: cyncMeta.colorActive,
+							rgb: cyncMeta.rgb,
+						},
+					);
+				}
+
 				env.markDeviceSeen(cyncMeta.deviceId);
 			} catch (err) {
 				env.log.warn(

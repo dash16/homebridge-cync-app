@@ -7,7 +7,6 @@ import {
 } from './config-client.js';
 import { TcpClient } from './tcp-client.js';
 import { CyncTokenStore, CyncTokenData } from './token-store.js';
-import { parseLightShows } from './light-shows.js';
 
 type SessionWithPossibleTokens = {
 	accessToken?: string;
@@ -637,40 +636,8 @@ export class CyncClient {
 
 				const propsRecord = props as Record<string, unknown>;
 
-				(mesh as Record<string, unknown>).rawProperties = propsRecord;
 				(mesh as Record<string, unknown>).lightShows = propsRecord.lightShows;
-				(mesh as Record<string, unknown>).sceneArray = propsRecord.sceneArray;
 				(mesh as Record<string, unknown>).musicShows = propsRecord.musicShows;
-
-				this.log.debug(
-					'CyncClient: mesh %s properties keys=%s',
-					meshName,
-					JSON.stringify(Object.keys(propsRecord).sort()),
-				);
-
-				if (propsRecord.sceneArray !== undefined) {
-					this.log.debug(
-						'CyncClient: mesh %s sceneArray=%s',
-						meshName,
-						JSON.stringify(propsRecord.sceneArray),
-					);
-				}
-
-				if (propsRecord.lightShows !== undefined) {
-					this.log.debug(
-						'CyncClient: mesh %s lightShows=%s',
-						meshName,
-						JSON.stringify(propsRecord.lightShows),
-					);
-				}
-
-				if (propsRecord.musicShows !== undefined) {
-					this.log.debug(
-						'CyncClient: mesh %s musicShows=%s',
-						meshName,
-						JSON.stringify(propsRecord.musicShows),
-					);
-				}
 
 				type DeviceProps = Record<string, unknown>;
 				const bulbsArray = (props as DeviceProps).bulbsArray as unknown;
@@ -774,14 +741,6 @@ export class CyncClient {
 							}
 						}
 
-						const rawLightShowCrcMap = d.savedLightShowsCrcMap;
-
-						const deviceLightShows =
-							rawLightShowCrcMap &&
-							typeof rawLightShowCrcMap === 'object'
-								? parseLightShows(propsRecord.lightShows, rawLightShowCrcMap)
-								: [];
-
 						devicesForMesh.push({
 							id,
 							name: displayName ?? undefined,
@@ -793,7 +752,6 @@ export class CyncClient {
 							raw_switch_id: rawSwitchId,
 							...(switchIndex !== undefined && { switch_index: switchIndex }),
 							raw: d,
-							...(deviceLightShows.length > 0 && { light_shows: deviceLightShows }),
 						});
 					}
 
@@ -859,7 +817,6 @@ export class CyncClient {
 	public async activateLightShow(
 		deviceId: string,
 		showIndex: number,
-		crc?: number,
 	): Promise<boolean> {
 		return this.tcpClient.activateLightShow(deviceId, showIndex);
 	}
@@ -867,7 +824,6 @@ export class CyncClient {
 	public async activateMusicShow(
 		deviceId: string,
 		showIndex: number,
-		crc?: number,
 	): Promise<boolean> {
 		return this.tcpClient.activateMusicShow(deviceId, showIndex);
 	}

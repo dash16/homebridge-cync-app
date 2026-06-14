@@ -29,7 +29,6 @@ export function configureCyncLightShowAccessory(
 	activateLightShow: (
 		deviceId: string,
 		showIndex: number,
-		crc?: number,
 	) => Promise<boolean>,
 ): void {
 	const Service = env.api.hap.Service;
@@ -86,11 +85,6 @@ export function configureCyncLightShowAccessory(
 		.onSet(async (value: CharacteristicValue): Promise<void> => {
 			const on = value === true;
 
-			const crc =
-				typeof lightShow.crc === 'number'
-					? lightShow.crc
-					: undefined;
-
 			if (showIndex === undefined) {
 				env.log.warn(
 					'Cync Light Show missing numeric index: device=%s show=%s',
@@ -108,7 +102,7 @@ export function configureCyncLightShowAccessory(
 					showIndex,
 				);
 
-				const activated = await activateLightShow(deviceId, showIndex, crc);
+				const activated = await activateLightShow(deviceId, showIndex);
 
 				if (activated) {
 					env.markActiveLightShowForDevice?.(deviceId, showIndex);

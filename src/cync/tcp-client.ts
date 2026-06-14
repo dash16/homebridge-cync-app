@@ -831,142 +831,6 @@ export class TcpClient {
 		]);
 	}
 
-	private buildBlockedDeviceCommandBodies(
-		opcode: Buffer,
-		payload: Buffer,
-		blockSize: number,
-	): Array<{ blockIndex: number; commandBody: Buffer }> {
-		const chunkSize = blockSize - 1;
-		const payloadForChunking = Buffer.concat([Buffer.from([0x00]), payload]);
-
-		const chunks: Buffer[] = [];
-		for (let offset = 0; offset < payloadForChunking.length; offset += chunkSize) {
-			chunks.push(Buffer.from(payloadForChunking.subarray(offset, offset + chunkSize)));
-		}
-
-		if (chunks.length > 255) {
-			throw new Error(`Device command has too many chunks: ${chunks.length}`);
-		}
-
-		if (chunks.length > 0) {
-			chunks[0][0] = chunks.length;
-		}
-
-		return chunks.map((chunk, blockIndex) => Buffer.concat([
-			opcode,
-			Buffer.from([(blockIndex + 1) & 0xff]),
-			chunk,
-		])).map((commandBody, blockIndex) => ({ blockIndex, commandBody }));
-	}
-
-	private buildCyncTcpEnvelope(
-		controllerId: number,
-		seq: number,
-		xlinkFrame: Buffer,
-	): Buffer {
-		const header = Buffer.alloc(5);
-		header.writeUInt8(0x73, 0);
-		header.writeUInt32BE(4 + 2 + 1 + xlinkFrame.length, 1);
-
-		const controllerBytes = Buffer.alloc(4);
-		controllerBytes.writeUInt32BE(controllerId, 0);
-
-		const seqBytes = Buffer.alloc(2);
-		seqBytes.writeUInt16BE(seq, 0);
-
-		return Buffer.concat([
-			header,
-			controllerBytes,
-			seqBytes,
-			Buffer.from([0x00]),
-			xlinkFrame,
-		]);
-	}
-
-	private buildXlinkDeviceBlock(
-		commandType: number,
-		commandBody: Buffer,
-		blockIndex: number,
-		meshAddress: number,
-		messageId: number,
-	): Buffer {
-		const wrappedPayload = Buffer.alloc(7 + commandBody.length);
-
-		wrappedPayload.writeUIntLE(blockIndex & 0xffffff, 0, 3);
-		wrappedPayload.writeUInt16BE(0, 3);
-		wrappedPayload.writeUInt16LE(meshAddress & 0xffff, 5);
-		commandBody.copy(wrappedPayload, 7);
-
-		return this.buildXlinkFrame(
-			commandType,
-			wrappedPayload,
-			messageId,
-		);
-	}
-
-	private buildXlinkFrame(
-		commandType: number,
-		payload: Buffer,
-		messageId: number,
-	): Buffer {
-		const XLINK_CONSTANT = 0xf8;
-
-		const header = Buffer.alloc(8);
-		header.writeUInt32LE(messageId, 0);
-		header.writeUInt8(XLINK_CONSTANT, 4);
-		header.writeUInt8(commandType & 0xff, 5);
-		header.writeUInt16LE(payload.length, 6);
-
-		const checksumSeed = Buffer.concat([
-			Buffer.from([commandType & 0xff]),
-			header.subarray(6, 8),
-			payload,
-		]);
-
-		let checksum = 0;
-		for (const byte of checksumSeed) {
-			checksum = (checksum + byte) & 0xff;
-		}
-
-		const unescaped = Buffer.concat([
-			header,
-			payload,
-			Buffer.from([checksum]),
-		]);
-
-		const escaped: number[] = [];
-		for (const byte of unescaped) {
-			if (byte === 0x7d) {
-				escaped.push(0x7d, 0x5d);
-			} else if (byte === 0x7e) {
-				escaped.push(0x7d, 0x5e);
-			} else {
-				escaped.push(byte);
-			}
-		}
-
-		return Buffer.concat([
-			Buffer.from([0x7e]),
-			Buffer.from(escaped),
-			Buffer.from([0x7e]),
-		]);
-	}
-
-	private buildXlinkShowBlock(
-		commandBody: Buffer,
-		blockIndex: number,
-		meshAddress: number,
-		messageId: number,
-	): Buffer {
-		return this.buildXlinkDeviceBlock(
-			0x8e,
-			commandBody,
-			blockIndex,
-			meshAddress,
-			messageId,
-		);
-	}
-
 	private buildRunModePacket(
 		controllerId: number,
 		meshId: number,
@@ -1273,11 +1137,11 @@ export class TcpClient {
 			return false;
 		});
 	}
+
 	public async activateMusicShow(
 		deviceId: string,
 		showIndex: number,
 	): Promise<boolean> {
-
 		return this.enqueueCommand(async () => {
 			if (!this.config) {
 				this.log.warn('[Cync TCP] activateMusicShow: no config available.');

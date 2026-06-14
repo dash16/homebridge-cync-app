@@ -26,7 +26,6 @@ export function configureCyncMusicShowAccessory(
 	activateMusicShow: (
 		deviceId: string,
 		showIndex: number,
-		crc?: number,
 	) => Promise<boolean>,
 ): void {
 	const Service = env.api.hap.Service;
@@ -83,11 +82,6 @@ export function configureCyncMusicShowAccessory(
 		.onSet(async (value: CharacteristicValue): Promise<void> => {
 			const on = value === true;
 
-			const crc =
-				typeof musicShow.crc === 'number'
-					? musicShow.crc
-					: undefined;
-
 			if (showIndex === undefined) {
 				env.log.warn(
 					'Cync Music Show missing numeric index: device=%s show=%s',
@@ -105,7 +99,7 @@ export function configureCyncMusicShowAccessory(
 					showIndex,
 				);
 
-				const activated = await activateMusicShow(deviceId, showIndex, crc);
+				const activated = await activateMusicShow(deviceId, showIndex);
 
 				if (activated) {
 					env.markActiveMusicShowForDevice?.(deviceId, showIndex);

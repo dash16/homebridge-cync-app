@@ -140,14 +140,14 @@ homebridge.addEventListener('ready', async () => {
 	let cfg = pluginConfig[0] || {};
 
 	const exposeCustomShowsInput = document.getElementById('cyncExposeCustomShows');
-		exposeCustomShowsInput.checked = cfg.exposeCustomShows === true;
+	exposeCustomShowsInput.checked = cfg.exposeCustomShows === true;
 
-		exposeCustomShowsInput.addEventListener('change', async () => {
-			await updateConfig({
-				exposeCustomShows: exposeCustomShowsInput.checked,
-			});
-			statusEl.textContent = 'Setting updated. Click Save.';
+	exposeCustomShowsInput.addEventListener('change', async () => {
+		await updateConfig({
+			exposeCustomShows: exposeCustomShowsInput.checked,
 		});
+		statusEl.textContent = 'Setting updated. Click Save.';
+	});
 
 	exposeLightShowsInput.checked = cfg.exposeLightShows === true;
 

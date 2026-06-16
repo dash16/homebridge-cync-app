@@ -218,6 +218,9 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 			if (brightnessPct !== undefined) {
 				ctx.cync.brightness = brightnessPct;
+				if (brightnessPct > 0) {
+					ctx.cync.lastNonZeroBrightness = brightnessPct;
+				}
 
 				this.log.debug(
 					'Cync: LAN update -> %s brightness=%d (deviceId=%s)',

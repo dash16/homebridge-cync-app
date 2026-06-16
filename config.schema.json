@@ -29,6 +29,67 @@
 				"type": "string",
 				"pattern": "^[0-9]{6}$",
 				"description": "Temporary 6-digit code emailed by Cync when you sign in. Leave blank normally; only needed when performing a fresh login."
+			},
+			"exposeCustomShows": {
+				"title": "Expose Custom Shows",
+				"type": "boolean",
+				"default": false,
+				"description": "Expose saved Cync RGBIC Custom Show switches for compatible devices."
+			},
+			"exposeLightShows": {
+				"title": "Expose Light Shows",
+				"type": "boolean",
+				"default": false,
+				"description": "Expose built-in Cync RGBIC Light Show switches for compatible devices."
+			},
+			"enabledLightShowIndexes": {
+				"title": "Enabled Light Shows",
+				"type": "array",
+				"items": {
+					"type": "number",
+					"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 65, 67],
+					"enumNames": [
+						"Candle",
+						"Rainbow",
+						"Fireworks",
+						"Volcanic",
+						"Aurora",
+						"Happy Holidays",
+						"Red White Blue",
+						"Vegas",
+						"Party Time",
+						"Power Up",
+						"Cyber"
+					]
+				},
+				"uniqueItems": true,
+				"default": [2]
+			},
+			"exposeMusicShows": {
+				"title": "Expose Music Shows",
+				"type": "boolean",
+				"default": false,
+				"description": "Expose built-in Cync RGBIC Music Show switches for compatible devices."
+			},
+			"enabledMusicShowIndexes": {
+				"title": "Enabled Music Shows",
+				"type": "array",
+				"items": {
+					"type": "number",
+					"enum": [1, 2, 3, 4, 5, 6, 7, 8],
+					"enumNames": [
+						"Midnight",
+						"Earth Tones",
+						"Heat Wave",
+						"Solar Flare",
+						"Breeze",
+						"Tropical",
+						"Spectrum",
+						"Supernova"
+					]
+				},
+				"uniqueItems": true,
+				"default": [1]
 			}
 		},
 		"required": [

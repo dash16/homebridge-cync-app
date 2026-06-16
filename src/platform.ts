@@ -24,6 +24,14 @@ import { configureCyncLightAccessory } from './cync/cync-light-accessory.js';
 import { configureCyncSwitchAccessory } from './cync/cync-switch-accessory.js';
 import { configureCyncOutletAccessory } from './cync/cync-outlet-accessory.js';
 import { configureCyncFanAccessory } from './cync/cync-fan-accessory.js';
+import {
+	BUILT_IN_CYNC_LIGHT_SHOWS,
+	configureCyncLightShowAccessory,
+} from './cync/cync-light-show-accessory.js';
+import {
+	BUILT_IN_CYNC_MUSIC_SHOWS,
+	configureCyncMusicShowAccessory,
+} from './cync/cync-music-show-accessory.js';
 import { classifyCyncDevice } from './cync/device-classifier.js';
 
 const toCyncLogger = (log: Logger): CyncLogger => ({
@@ -32,6 +40,17 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 	warn: log.warn.bind(log),
 	error: log.error.bind(log),
 });
+
+const CYNC_LIGHT_SHOW_DEVICE_TYPES = new Set<number>([
+	76, // Outdoor 48" dynamic light strip
+	123, // Light strip
+]);
+
+type CyncShowKind =
+	| 'built-in-light'
+	| 'built-in-music'
+	| 'custom-light'
+	| 'custom-music';
 
 function getDefaultCapabilitiesForDeviceType(): CyncCapabilityProfile {
 	const isLight = false;
@@ -68,7 +87,6 @@ function promoteCapabilitiesFromLan(
 	return changed;
 }
 
-
 export class CyncAppPlatform implements DynamicPlatformPlugin {
 	public readonly accessories: PlatformAccessory[] = [];
 	public configureAccessory(accessory: PlatformAccessory): void {
@@ -90,8 +108,173 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private readonly offlineTimeoutMs = 30 * 60 * 1000;
 	private readonly pollIntervalMs = 60_000; // 60 seconds
 
+	private setMainAccessoryOnForDevice(deviceId: string, on: boolean): void {
+		const accessory = this.deviceIdToAccessory.get(deviceId);
+		if (!accessory) {
+			return;
+		}
+
+		const Service = this.api.hap.Service;
+		const Characteristic = this.api.hap.Characteristic;
+
+		const service =
+			accessory.getService(Service.Lightbulb) ??
+			accessory.getService(Service.Outlet) ??
+			accessory.getService(Service.Switch);
+
+		service?.updateCharacteristic(Characteristic.On, on);
+	}
+
+	private clearActiveShowsForDevice(deviceId: string): void {
+		this.markActiveLightShowForDevice(deviceId, null);
+		this.markActiveMusicShowForDevice(deviceId, null);
+	}
+
+	private shouldExposeCustomShows(): boolean {
+		const raw = this.config as Record<string, unknown>;
+		return raw.exposeCustomShows === true;
+	}
+
+	private readonly musicShowServicesByDeviceId = new Map<string, Array<{
+		accessory: PlatformAccessory;
+		showIndex: number;
+	}>>();
+
+	private registerMusicShowAccessoryForDevice(
+		deviceId: string,
+		accessory: PlatformAccessory,
+		showIndex: number,
+	): void {
+		const existing = this.musicShowServicesByDeviceId.get(deviceId) ?? [];
+
+		const withoutDuplicate = existing.filter(
+			entry => entry.accessory.UUID !== accessory.UUID,
+		);
+
+		withoutDuplicate.push({ accessory, showIndex });
+
+		this.musicShowServicesByDeviceId.set(deviceId, withoutDuplicate);
+	}
+
+	private markActiveMusicShowForDevice(
+		deviceId: string,
+		activeShowIndex: number | null,
+	): void {
+		const musicEntries = this.musicShowServicesByDeviceId.get(deviceId) ?? [];
+		const lightEntries = this.lightShowServicesByDeviceId.get(deviceId) ?? [];
+		const Characteristic = this.api.hap.Characteristic;
+		const Service = this.api.hap.Service;
+
+		for (const entry of musicEntries) {
+			const active = activeShowIndex !== null && entry.showIndex === activeShowIndex;
+
+			entry.accessory.context.musicShowActive = active;
+
+			const service = entry.accessory.getService(Service.Switch);
+			service?.updateCharacteristic(Characteristic.On, active);
+		}
+
+		if (activeShowIndex !== null) {
+			for (const entry of lightEntries) {
+				entry.accessory.context.lightShowActive = false;
+
+				const service = entry.accessory.getService(Service.Switch);
+				service?.updateCharacteristic(Characteristic.On, false);
+			}
+		}
+	}
+
+	private readonly lightShowServicesByDeviceId = new Map<string, Array<{
+		accessory: PlatformAccessory;
+		showIndex: number;
+	}>>();
+
+	private shouldExposeLightShows(): boolean {
+		const raw = this.config as Record<string, unknown>;
+		return raw.exposeLightShows === true;
+	}
+
+	private getEnabledLightShowIndexes(): Set<number> | null {
+		const raw = this.config as Record<string, unknown>;
+		const value = raw.enabledLightShowIndexes;
+
+		if (!Array.isArray(value)) {
+			return null;
+		}
+
+		return new Set(
+			value
+				.map(Number)
+				.filter((index) => Number.isFinite(index)),
+		);
+	}
+
+	private shouldExposeMusicShows(): boolean {
+		const raw = this.config as Record<string, unknown>;
+		return raw.exposeMusicShows === true;
+	}
+
+	private getEnabledMusicShowIndexes(): Set<number> | null {
+		const raw = this.config as Record<string, unknown>;
+		const value = raw.enabledMusicShowIndexes;
+
+		if (!Array.isArray(value)) {
+			return null;
+		}
+
+		return new Set(
+			value
+				.map(Number)
+				.filter((index) => Number.isFinite(index)),
+		);
+	}
+
 	private markDeviceSeen(deviceId: string): void {
 		this.deviceLastSeen.set(deviceId, Date.now());
+	}
+
+	private registerLightShowAccessoryForDevice(
+		deviceId: string,
+		accessory: PlatformAccessory,
+		showIndex: number,
+	): void {
+		const existing = this.lightShowServicesByDeviceId.get(deviceId) ?? [];
+
+		const withoutDuplicate = existing.filter(
+			entry => entry.accessory.UUID !== accessory.UUID,
+		);
+
+		withoutDuplicate.push({ accessory, showIndex });
+
+		this.lightShowServicesByDeviceId.set(deviceId, withoutDuplicate);
+	}
+
+	private markActiveLightShowForDevice(
+		deviceId: string,
+		activeShowIndex: number | null,
+	): void {
+		const lightEntries = this.lightShowServicesByDeviceId.get(deviceId) ?? [];
+		const musicEntries = this.musicShowServicesByDeviceId.get(deviceId) ?? [];
+		const Characteristic = this.api.hap.Characteristic;
+		const Service = this.api.hap.Service;
+
+		for (const entry of lightEntries) {
+			const active = activeShowIndex !== null && entry.showIndex === activeShowIndex;
+
+			entry.accessory.context.lightShowActive = active;
+
+			const service = entry.accessory.getService(Service.Switch);
+			service?.updateCharacteristic(Characteristic.On, active);
+		}
+
+		if (activeShowIndex !== null) {
+			for (const entry of musicEntries) {
+				entry.accessory.context.musicShowActive = false;
+
+				const service = entry.accessory.getService(Service.Switch);
+				service?.updateCharacteristic(Characteristic.On, false);
+			}
+		}
 	}
 
 	private isDeviceProbablyOffline(deviceId: string): boolean {
@@ -101,6 +284,55 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			return false;
 		}
 		return Date.now() - last > this.offlineTimeoutMs;
+	}
+
+	private cleanupDisabledShowAccessoriesForDevice(
+		meshId: string,
+		deviceId: string,
+		enabledShowIndexes: Set<number>,
+		showKind: CyncShowKind,
+		uuidPrefix: string,
+		logLabel: string,
+	): void {
+		const expectedUuids = new Set(
+			[...enabledShowIndexes].map((showIndex) =>
+				this.api.hap.uuid.generate(`${uuidPrefix}-${meshId}-${deviceId}-${showIndex}`),
+			),
+		);
+
+		const staleAccessories = this.accessories.filter((accessory) => {
+			const ctx = accessory.context as Record<string, unknown>;
+
+			return (
+				ctx.parentDeviceId === deviceId &&
+				ctx.showKind === showKind &&
+				!expectedUuids.has(accessory.UUID)
+			);
+		});
+
+		if (staleAccessories.length === 0) {
+			return;
+		}
+
+		this.log.info(
+			'Cync: removing %d disabled %s accessory/accessories for deviceId=%s',
+			staleAccessories.length,
+			logLabel,
+			deviceId,
+		);
+
+		this.api.unregisterPlatformAccessories(
+			'homebridge-cync-app',
+			'CyncAppPlatform',
+			staleAccessories,
+		);
+
+		for (const staleAccessory of staleAccessories) {
+			const index = this.accessories.indexOf(staleAccessory);
+			if (index >= 0) {
+				this.accessories.splice(index, 1);
+			}
+		}
 	}
 
 	private startPollingDevice(deviceId: string): void {
@@ -324,6 +556,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		  isDeviceProbablyOffline: this.isDeviceProbablyOffline.bind(this),
 		  markDeviceSeen: this.markDeviceSeen.bind(this),
 		  startPollingDevice: this.startPollingDevice.bind(this),
+		  registerLightShowAccessoryForDevice: this.registerLightShowAccessoryForDevice.bind(this),
+		  registerMusicShowAccessoryForDevice: this.registerMusicShowAccessoryForDevice.bind(this),
+		  markActiveMusicShowForDevice: this.markActiveMusicShowForDevice.bind(this),
+		  markActiveLightShowForDevice: this.markActiveLightShowForDevice.bind(this),
+		  setMainAccessoryOnForDevice: this.setMainAccessoryOnForDevice.bind(this),
+		  clearActiveShowsForDevice: this.clearActiveShowsForDevice.bind(this),
 		  registerAccessoryForDevice: (deviceId, accessory) => {
 				this.deviceIdToAccessory.set(deviceId, accessory);
 		  },
@@ -456,6 +694,380 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					`capabilities=${classification.capabilities.join(',') || 'none'} ` +
 					`accessoryType=${classification.accessoryType} ` +
 					`reason="${classification.reason}"`,
+				);
+
+				const rawDevice =
+					record.raw && typeof record.raw === 'object'
+						? record.raw as Record<string, unknown>
+						: undefined;
+
+				const meshRecord = mesh as unknown as Record<string, unknown>;
+
+				const savedLightShowsCrcMap = rawDevice?.savedLightShowsCrcMap;
+
+				if (
+					savedLightShowsCrcMap &&
+					typeof savedLightShowsCrcMap === 'object'
+				) {
+					this.log.debug(
+						'Cync RGBIC saved show CRC map for %s: %s',
+						deviceName,
+						JSON.stringify(savedLightShowsCrcMap),
+					);
+				}
+
+				const savedShowCrcMap =
+					savedLightShowsCrcMap &&
+					typeof savedLightShowsCrcMap === 'object'
+						? savedLightShowsCrcMap as Record<string, unknown>
+						: {};
+
+				const customLightShows = Array.isArray(meshRecord.lightShows)
+					? meshRecord.lightShows
+						.map((show) => show as Record<string, unknown>)
+						.filter((show) =>
+							typeof show.index === 'number' &&
+							typeof show.name === 'string' &&
+							typeof savedShowCrcMap[String(show.index)] === 'number',
+						)
+						.map((show) => ({
+							index: show.index as number,
+							name: show.name as string,
+							crc: savedShowCrcMap[String(show.index)] as number,
+						}))
+					: [];
+
+				const customMusicShows = Array.isArray(meshRecord.musicShows)
+					? meshRecord.musicShows
+						.map((show) => show as Record<string, unknown>)
+						.filter((show) =>
+							typeof show.index === 'number' &&
+							typeof show.name === 'string' &&
+							typeof savedShowCrcMap[String(show.index)] === 'number',
+						)
+						.map((show) => ({
+							index: show.index as number,
+							name: show.name as string,
+							crc: savedShowCrcMap[String(show.index)] as number,
+						}))
+					: [];
+
+				this.log.debug(
+					'Cync custom show discovery for %s: expose=%s light=%d music=%d crcKeys=%s',
+					deviceName,
+					String(this.shouldExposeCustomShows()),
+					customLightShows.length,
+					customMusicShows.length,
+					JSON.stringify(Object.keys(savedShowCrcMap)),
+				);
+
+				const enabledLightShowIndexes = this.getEnabledLightShowIndexes();
+
+				const lightShows = BUILT_IN_CYNC_LIGHT_SHOWS.filter(
+					lightShow =>
+						enabledLightShowIndexes === null ||
+						enabledLightShowIndexes.has(lightShow.index),
+				);
+
+				if (
+					this.shouldExposeLightShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+				) {
+					for (const lightShow of lightShows) {
+						const showIndex = lightShow.index;
+						const showName = lightShow.name;
+
+						const lightShowName = `${showName} (${deviceName} Light)`;
+						const lightShowUuidSeed = `cync-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
+						const lightShowUuid = this.api.hap.uuid.generate(lightShowUuidSeed);
+
+						let lightShowAccessory = this.accessories.find(
+							acc => acc.UUID === lightShowUuid,
+						);
+
+						if (lightShowAccessory) {
+							this.log.info(
+								'Cync: using cached light show accessory for %s (%s)',
+								lightShowName,
+								lightShowUuidSeed,
+							);
+						} else {
+							this.log.info(
+								'Cync: registering new light show accessory for %s (%s)',
+								lightShowName,
+								lightShowUuidSeed,
+							);
+
+							lightShowAccessory = new this.api.platformAccessory(
+								lightShowName,
+								lightShowUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[lightShowAccessory],
+							);
+
+							this.accessories.push(lightShowAccessory);
+						}
+
+						lightShowAccessory.context.device = device;
+						lightShowAccessory.context.lightShow = lightShow;
+						lightShowAccessory.context.parentDeviceId = deviceId;
+						lightShowAccessory.context.showKind = 'built-in-light';
+
+						configureCyncLightShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							lightShowAccessory,
+							lightShowName,
+							deviceId,
+							lightShow,
+							(showDeviceId, showIndex) =>
+								this.client.activateLightShow(
+									showDeviceId,
+									showIndex,
+								),
+						);
+					}
+				}
+
+				const enabledMusicShowIndexes = this.getEnabledMusicShowIndexes();
+
+				const musicShows = BUILT_IN_CYNC_MUSIC_SHOWS.filter(
+					musicShow =>
+						enabledMusicShowIndexes === null ||
+						enabledMusicShowIndexes.has(musicShow.index),
+				);
+
+				if (
+					this.shouldExposeMusicShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+				) {
+					for (const musicShow of musicShows) {
+						const showIndex = musicShow.index;
+						const showName = musicShow.name;
+
+						const musicShowName = `${showName} (${deviceName} Music)`;
+						const musicShowUuidSeed = `cync-musicshow-${mesh.id}-${deviceId}-${showIndex}`;
+						const musicShowUuid = this.api.hap.uuid.generate(musicShowUuidSeed);
+
+						let musicShowAccessory = this.accessories.find(
+							acc => acc.UUID === musicShowUuid,
+						);
+
+						if (musicShowAccessory) {
+							this.log.info(
+								'Cync: using cached music show accessory for %s (%s)',
+								musicShowName,
+								musicShowUuidSeed,
+							);
+						} else {
+							this.log.info(
+								'Cync: registering new music show accessory for %s (%s)',
+								musicShowName,
+								musicShowUuidSeed,
+							);
+
+							musicShowAccessory = new this.api.platformAccessory(
+								musicShowName,
+								musicShowUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[musicShowAccessory],
+							);
+
+							this.accessories.push(musicShowAccessory);
+						}
+
+						musicShowAccessory.context.device = device;
+						musicShowAccessory.context.musicShow = musicShow;
+						musicShowAccessory.context.parentDeviceId = deviceId;
+						musicShowAccessory.context.showKind = 'built-in-music';
+
+						configureCyncMusicShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							musicShowAccessory,
+							musicShowName,
+							deviceId,
+							musicShow,
+							(showDeviceId, showIndex) =>
+								this.client.activateMusicShow(
+									showDeviceId,
+									showIndex,
+								),
+						);
+					}
+				}
+
+				if (
+					this.shouldExposeCustomShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+				) {
+					for (const customLightShow of customLightShows) {
+						const showIndex = customLightShow.index;
+						const showName = customLightShow.name;
+
+						const customLightShowName = `${showName} (${deviceName} Custom Light)`;
+						const customLightShowUuidSeed = `cync-custom-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
+						const customLightShowUuid = this.api.hap.uuid.generate(customLightShowUuidSeed);
+
+						let customLightShowAccessory = this.accessories.find(
+							acc => acc.UUID === customLightShowUuid,
+						);
+
+						if (!customLightShowAccessory) {
+							customLightShowAccessory = new this.api.platformAccessory(
+								customLightShowName,
+								customLightShowUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[customLightShowAccessory],
+							);
+
+							this.accessories.push(customLightShowAccessory);
+						}
+
+						customLightShowAccessory.context.device = device;
+						customLightShowAccessory.context.lightShow = customLightShow;
+						customLightShowAccessory.context.parentDeviceId = deviceId;
+						customLightShowAccessory.context.showKind = 'custom-light';
+
+
+						configureCyncLightShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							customLightShowAccessory,
+							customLightShowName,
+							deviceId,
+							customLightShow,
+							(showDeviceId, showIndex) =>
+								this.client.activateLightShow(showDeviceId, showIndex),
+						);
+					}
+
+					for (const customMusicShow of customMusicShows) {
+						const showIndex = customMusicShow.index;
+						const showName = customMusicShow.name;
+
+						const customMusicShowName = `${showName} (${deviceName} Custom Music)`;
+						const customMusicShowUuidSeed = `cync-custom-musicshow-${mesh.id}-${deviceId}-${showIndex}`;
+						const customMusicShowUuid = this.api.hap.uuid.generate(customMusicShowUuidSeed);
+
+						let customMusicShowAccessory = this.accessories.find(
+							acc => acc.UUID === customMusicShowUuid,
+						);
+
+						if (!customMusicShowAccessory) {
+							customMusicShowAccessory = new this.api.platformAccessory(
+								customMusicShowName,
+								customMusicShowUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[customMusicShowAccessory],
+							);
+
+							this.accessories.push(customMusicShowAccessory);
+						}
+
+						customMusicShowAccessory.context.device = device;
+						customMusicShowAccessory.context.musicShow = customMusicShow;
+						customMusicShowAccessory.context.parentDeviceId = deviceId;
+						customMusicShowAccessory.context.showKind = 'custom-music';
+
+						configureCyncMusicShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							customMusicShowAccessory,
+							customMusicShowName,
+							deviceId,
+							customMusicShow,
+							(showDeviceId, showIndex) =>
+								this.client.activateMusicShow(showDeviceId, showIndex),
+						);
+					}
+				}
+
+				const enabledLightShowIndexesForCleanup =
+					this.shouldExposeLightShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(lightShows.map((lightShow) => lightShow.index))
+						: new Set<number>();
+
+				this.cleanupDisabledShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledLightShowIndexesForCleanup,
+					'built-in-light',
+					'cync-lightshow',
+					'light show',
+				);
+
+				const enabledMusicShowIndexesForCleanup =
+					this.shouldExposeMusicShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(musicShows.map((musicShow) => musicShow.index))
+						: new Set<number>();
+
+				this.cleanupDisabledShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledMusicShowIndexesForCleanup,
+					'built-in-music',
+					'cync-musicshow',
+					'music show',
+				);
+
+				const enabledCustomLightShowIndexesForCleanup =
+					this.shouldExposeCustomShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(customLightShows.map((customLightShow) => customLightShow.index))
+						: new Set<number>();
+
+				this.cleanupDisabledShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledCustomLightShowIndexesForCleanup,
+					'custom-light',
+					'cync-custom-lightshow',
+					'custom light show',
+				);
+
+				const enabledCustomMusicShowIndexesForCleanup =
+					this.shouldExposeCustomShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(customMusicShows.map((customMusicShow) => customMusicShow.index))
+						: new Set<number>();
+
+				this.cleanupDisabledShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledCustomMusicShowIndexesForCleanup,
+					'custom-music',
+					'cync-custom-musicshow',
+					'custom music show',
 				);
 
 				const deviceTypeStr =

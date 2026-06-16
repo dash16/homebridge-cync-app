@@ -45,8 +45,56 @@
 		<div class="mb-3">
 			<label for="cyncOtp" class="form-label">Verification Code (OTP)</label>
 			<input type="text" id="cyncOtp" class="form-control" autocomplete="one-time-code">
-			</div>
 		</div>
+	</div>
+</div>
+
+<div class="card mb-3">
+	<div class="card-body">
+		<h5 class="card-title">Cync Shows</h5>
+
+		<div class="form-check mt-3">
+			<input type="checkbox" id="cyncExposeCustomShows" class="form-check-input">
+			<label for="cyncExposeCustomShows" class="form-check-label">
+				Expose saved Custom Shows as HomeKit switches
+			</label>
+		</div>
+
+		<p class="text-muted mt-2">
+			Saved Custom Shows created in the Cync app can be exposed as separate HomeKit switches.
+		</p>
+		<div class="form-check">
+			<input type="checkbox" id="cyncExposeLightShows" class="form-check-input">
+			<label for="cyncExposeLightShows" class="form-check-label">
+				Expose built-in Light Shows as HomeKit switches
+			</label>
+		</div>
+
+		<p class="text-muted mt-2">
+			Supported RGBIC devices can expose selected built-in Cync Light Shows as separate HomeKit switches.
+		</p>
+
+		<details class="mt-3">
+			<summary>Choose Light Shows to expose</summary>
+
+			<div id="cyncLightShowChoices" class="mt-3"></div>
+		</details>
+		<div class="form-check mt-3">
+			<input type="checkbox" id="cyncExposeMusicShows" class="form-check-input">
+			<label for="cyncExposeMusicShows" class="form-check-label">
+				Expose built-in Music Shows as HomeKit switches
+			</label>
+		</div>
+
+		<p class="text-muted mt-2">
+			Supported RGBIC devices can expose selected built-in Cync Music Shows as separate HomeKit switches.
+		</p>
+
+		<details class="mt-3">
+			<summary>Choose Music Shows to expose</summary>
+
+			<div id="cyncMusicShowChoices" class="mt-3"></div>
+		</details>
 	</div>
 </div>
 
@@ -59,8 +107,151 @@ homebridge.addEventListener('ready', async () => {
 	const signOutBtn = document.getElementById('cyncSignOutBtn');
 	const statusEl = document.getElementById('cyncStatus');
 
+	const exposeLightShowsInput = document.getElementById('cyncExposeLightShows');
+	const lightShowChoicesEl = document.getElementById('cyncLightShowChoices');
+	const BUILT_IN_CYNC_LIGHT_SHOWS = [
+		{ index: 1, name: 'Candle' },
+		{ index: 2, name: 'Rainbow' },
+		{ index: 3, name: 'Fireworks' },
+		{ index: 4, name: 'Volcanic' },
+		{ index: 5, name: 'Aurora' },
+		{ index: 6, name: 'Happy Holidays' },
+		{ index: 7, name: 'Red White Blue' },
+		{ index: 8, name: 'Vegas' },
+		{ index: 9, name: 'Party Time' },
+		{ index: 65, name: 'Power Up' },
+		{ index: 67, name: 'Cyber' },
+	];
+
+	const exposeMusicShowsInput = document.getElementById('cyncExposeMusicShows');
+	const musicShowChoicesEl = document.getElementById('cyncMusicShowChoices');
+	const BUILT_IN_CYNC_MUSIC_SHOWS = [
+		{ index: 1, name: 'Midnight' },
+		{ index: 2, name: 'Earth Tones' },
+		{ index: 3, name: 'Heat Wave' },
+		{ index: 4, name: 'Solar Flare' },
+		{ index: 5, name: 'Breeze' },
+		{ index: 6, name: 'Tropical' },
+		{ index: 7, name: 'Spectrum' },
+		{ index: 8, name: 'Supernova' },
+	];
+
 	let pluginConfig = await homebridge.getPluginConfig();
 	let cfg = pluginConfig[0] || {};
+
+	const exposeCustomShowsInput = document.getElementById('cyncExposeCustomShows');
+	exposeCustomShowsInput.checked = cfg.exposeCustomShows === true;
+
+	exposeCustomShowsInput.addEventListener('change', async () => {
+		await updateConfig({
+			exposeCustomShows: exposeCustomShowsInput.checked,
+		});
+		statusEl.textContent = 'Setting updated. Click Save.';
+	});
+
+	exposeLightShowsInput.checked = cfg.exposeLightShows === true;
+
+	const enabledLightShowIndexes = Array.isArray(cfg.enabledLightShowIndexes)
+		? cfg.enabledLightShowIndexes.map(Number)
+		: [2];
+
+	function renderLightShowChoices() {
+		lightShowChoicesEl.innerHTML = '';
+
+		for (const show of BUILT_IN_CYNC_LIGHT_SHOWS) {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'form-check';
+
+			const input = document.createElement('input');
+			input.type = 'checkbox';
+			input.className = 'form-check-input';
+			input.id = `cyncLightShow${show.index}`;
+			input.value = String(show.index);
+			input.checked = enabledLightShowIndexes.includes(show.index);
+
+			const label = document.createElement('label');
+			label.className = 'form-check-label';
+			label.htmlFor = input.id;
+			label.textContent = show.name;
+
+			input.addEventListener('change', async () => {
+				const selected = Array.from(
+					lightShowChoicesEl.querySelectorAll('input[type="checkbox"]:checked'),
+				).map((checkedInput) => Number(checkedInput.value));
+
+				await updateConfig({
+					enabledLightShowIndexes: selected,
+				});
+
+				statusEl.textContent = 'Light Show selection updated. Click Save.';
+			});
+
+			wrapper.appendChild(input);
+			wrapper.appendChild(label);
+			lightShowChoicesEl.appendChild(wrapper);
+		}
+	}
+
+	renderLightShowChoices();
+
+	exposeLightShowsInput.addEventListener('change', async () => {
+		await updateConfig({
+			exposeLightShows: exposeLightShowsInput.checked,
+		});
+		statusEl.textContent = 'Setting updated. Click Save.';
+	});
+
+	exposeMusicShowsInput.checked = cfg.exposeMusicShows === true;
+
+	const enabledMusicShowIndexes = Array.isArray(cfg.enabledMusicShowIndexes)
+		? cfg.enabledMusicShowIndexes.map(Number)
+		: [1];
+
+	function renderMusicShowChoices() {
+		musicShowChoicesEl.innerHTML = '';
+
+		for (const show of BUILT_IN_CYNC_MUSIC_SHOWS) {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'form-check';
+
+			const input = document.createElement('input');
+			input.type = 'checkbox';
+			input.className = 'form-check-input';
+			input.id = `cyncMusicShow${show.index}`;
+			input.value = String(show.index);
+			input.checked = enabledMusicShowIndexes.includes(show.index);
+
+			const label = document.createElement('label');
+			label.className = 'form-check-label';
+			label.htmlFor = input.id;
+			label.textContent = show.name;
+
+			input.addEventListener('change', async () => {
+				const selected = Array.from(
+					musicShowChoicesEl.querySelectorAll('input[type="checkbox"]:checked'),
+				).map((checkedInput) => Number(checkedInput.value));
+
+				await updateConfig({
+					enabledMusicShowIndexes: selected,
+				});
+
+				statusEl.textContent = 'Music Show selection updated. Click Save.';
+			});
+
+			wrapper.appendChild(input);
+			wrapper.appendChild(label);
+			musicShowChoicesEl.appendChild(wrapper);
+		}
+	}
+
+	renderMusicShowChoices();
+
+	exposeMusicShowsInput.addEventListener('change', async () => {
+		await updateConfig({
+			exposeMusicShows: exposeMusicShowsInput.checked,
+		});
+		statusEl.textContent = 'Setting updated. Click Save.';
+	});
 
 	// Helper to update in-memory pluginConfig (persisted when user clicks Save in HB)
 	async function updateConfig(partial) {

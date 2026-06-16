@@ -12,18 +12,18 @@ import { lookupDeviceModel } from './device-catalog.js';
 
 // Narrowed view of the Cync device properties returned by getDeviceProperties()
 type CyncDeviceRaw = {
-  displayName?: string;
-  firmwareVersion?: string;
-  mac?: string;
-  wifiMac?: string;
-  deviceType?: number;
-  deviceID?: number;
-  [key: string]: unknown;
+	displayName?: string;
+	firmwareVersion?: string;
+	mac?: string;
+	wifiMac?: string;
+	deviceType?: number;
+	deviceID?: number;
+	[key: string]: unknown;
 };
 
 // CyncDevice as seen by the platform, possibly enriched with a `raw` block
 type CyncDeviceWithRaw = CyncDevice & {
-  raw?: CyncDeviceRaw;
+	raw?: CyncDeviceRaw;
 };
 
 export interface CyncCapabilityProfile {
@@ -36,40 +36,72 @@ export interface CyncCapabilityProfile {
 
 // Context stored on the accessory
 export interface CyncAccessoryContext {
-  cync?: {
-    meshId: string;
-    deviceId: string;
-    productId?: string;
+	cync?: {
+		meshId: string;
+		deviceId: string;
+		productId?: string;
 
-    deviceType?: number;
+		deviceType?: number;
 
     on?: boolean;
     brightness?: number; // 0–100 (LAN "level")
     lastNonZeroBrightness?: number; // 1-100, used to restore dimmers after off state reports 0
 
-    hue?: number;          // 0–360
-    saturation?: number;   // 0–100
-    rgb?: { r: number; g: number; b: number };
-    colorActive?: boolean; // true if we last set RGB color
+		hue?: number; // 0-360
+		saturation?: number; // 0-100
+		rgb?: { r: number; g: number; b: number };
+		colorActive?: boolean; // true if we last set RGB color
 
-    // Tunable-white state
-	colorTemperature?: number; // mireds (e.g. ~153–500)
-	// Capability-based detection & characteristic gating
-	capabilities?: CyncCapabilityProfile;
-  };
-  [key: string]: unknown;
+		// Tunable-white state
+		colorTemperature?: number; // mireds (e.g. ~153-500)
+		// Capability-based detection & characteristic gating
+		capabilities?: CyncCapabilityProfile;
+	};
+	[key: string]: unknown;
 }
 
 // Minimal runtime “env” that accessory modules need from the platform
 export interface CyncAccessoryEnv {
-  log: Logger;
-  api: API;
-  tcpClient: TcpClient;
+	log: Logger;
+	api: API;
+	tcpClient: TcpClient;
 
-  isDeviceProbablyOffline(deviceId: string): boolean;
-  markDeviceSeen(deviceId: string): void;
-  startPollingDevice(deviceId: string): void;
-  registerAccessoryForDevice(deviceId: string, accessory: PlatformAccessory): void;
+	isDeviceProbablyOffline(deviceId: string): boolean;
+	markDeviceSeen(deviceId: string): void;
+	startPollingDevice(deviceId: string): void;
+	registerAccessoryForDevice(deviceId: string, accessory: PlatformAccessory): void;
+
+	registerLightShowAccessoryForDevice?: (
+		deviceId: string,
+		accessory: PlatformAccessory,
+		showIndex: number,
+	) => void;
+
+	markActiveLightShowForDevice?: (
+		deviceId: string,
+		activeShowIndex: number | null,
+	) => void;
+
+	registerMusicShowAccessoryForDevice?: (
+		deviceId: string,
+		accessory: PlatformAccessory,
+		showIndex: number,
+	) => void;
+
+	markActiveMusicShowForDevice?: (
+		deviceId: string,
+		activeShowIndex: number | null,
+	) => void;
+
+	clearActiveShowsForDevice?: (
+		deviceId: string,
+	) => void;
+
+	setMainAccessoryOnForDevice?: (
+		deviceId: string,
+		on: boolean,
+	) => void;
+
 }
 
 /**

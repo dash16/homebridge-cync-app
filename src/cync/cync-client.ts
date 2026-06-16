@@ -8,7 +8,6 @@ import {
 import { TcpClient } from './tcp-client.js';
 import { CyncTokenStore, CyncTokenData } from './token-store.js';
 
-
 type SessionWithPossibleTokens = {
 	accessToken?: string;
 	jwt?: string;
@@ -187,6 +186,7 @@ export class CyncClient {
 		}
 		return Date.now() >= (expiresAt - skewMs);
 	}
+
 	/**
 		 * Ensure we are logged in:
 		 * 1) Try stored token.
@@ -634,6 +634,11 @@ export class CyncClient {
 					Object.keys(props),
 				);
 
+				const propsRecord = props as Record<string, unknown>;
+
+				(mesh as Record<string, unknown>).lightShows = propsRecord.lightShows;
+				(mesh as Record<string, unknown>).musicShows = propsRecord.musicShows;
+
 				type DeviceProps = Record<string, unknown>;
 				const bulbsArray = (props as DeviceProps).bulbsArray as unknown;
 
@@ -809,6 +814,20 @@ export class CyncClient {
 		return cfg;
 	}
 
+	public async activateLightShow(
+		deviceId: string,
+		showIndex: number,
+	): Promise<boolean> {
+		return this.tcpClient.activateLightShow(deviceId, showIndex);
+	}
+
+	public async activateMusicShow(
+		deviceId: string,
+		showIndex: number,
+	): Promise<boolean> {
+		return this.tcpClient.activateMusicShow(deviceId, showIndex);
+	}
+
 	public async startTransport(
 		config: CyncCloudConfig,
 		loginCode: Uint8Array,
@@ -820,22 +839,13 @@ export class CyncClient {
 		const topology = this.getLanTopology();
 		this.tcpClient.applyLanTopology(topology);
 
-		// Optional: dump all frames as hex for debugging
-		this.tcpClient.onRawFrame((frame) => {
-			this.log.debug(
-				'[Cync TCP] raw frame (%d bytes): %s',
-				frame.byteLength,
-				frame.toString('hex'),
-			);
-		});
-
 		// REQUIRED: subscribe to parsed device updates
 		this.tcpClient.onDeviceUpdate((update) => {
 			if (this.lanUpdateHandler) {
 				this.lanUpdateHandler(update);
 			} else {
 				// Fallback: log only
-				this.log.info('[Cync TCP] device update callback fired; payload=%o', update);
+				this.log.debug('[Cync TCP] device update callback fired; payload=%o', update);
 			}
 		});
 

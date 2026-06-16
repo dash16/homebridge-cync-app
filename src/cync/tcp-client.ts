@@ -311,6 +311,7 @@ export class TcpClient {
 		// Previously the socket only opened on the first user-initiated SET,
 		// which left HomeKit showing stale "off" state until the user toggled.
 		await this.ensureConnected();
+
 	}
 
 	public applyLanTopology(topology: {
@@ -530,7 +531,7 @@ export class TcpClient {
 			if (!this.socket || this.socket.destroyed) {
 				return;
 			}
-			this.socket.write(Buffer.from('d300000000', 'hex'));
+			this.writeSocket(Buffer.from('d300000000', 'hex'), 'heartbeat');
 		}, 180_000);
 	}
 
@@ -682,7 +683,7 @@ export class TcpClient {
 					resolve: (confirmed) => resolve(!confirmed),
 				});
 
-				socket.write(packet);
+				this.writeSocket(packet, logLabel);
 
 				this.log.info(
 					'[Cync TCP] Sent %s packet: device=%s on=%s seq=%d controller=0x%s',
@@ -829,6 +830,70 @@ export class TcpClient {
 			end,
 		]);
 	}
+
+	private buildRunModePacket(
+		controllerId: number,
+		meshId: number,
+		mode: number,
+		index: number,
+		seq: number,
+	): Buffer {
+		const header = Buffer.from('7300000020', 'hex');
+
+		const switchBytes = Buffer.alloc(4);
+		switchBytes.writeUInt32BE(controllerId, 0);
+
+		const seqBytes = Buffer.alloc(2);
+		seqBytes.writeUInt16BE(seq, 0);
+
+		const meshBytes = Buffer.alloc(2);
+		meshBytes.writeUInt16LE(meshId, 0);
+
+		const modeByte = clampNumber(Math.round(mode), 0, 255);
+		const indexByte = clampNumber(Math.round(index), 0, 255);
+		const randomByte = Math.floor(Math.random() * 256);
+
+		const command = Buffer.from([
+			0xe2, 0x11, 0x02, 0x07,
+			modeByte,
+			indexByte,
+			randomByte,
+		]);
+
+		const xlinkPayload = Buffer.concat([
+			Buffer.from([
+				0x7e,
+				0x00, 0x00, 0x00, 0x00,
+				0xf8,
+				0xe2,
+				0x0e, 0x00,
+				0x00, 0x00, 0x00,
+				0x00, 0x00,
+			]),
+			meshBytes,
+			command,
+		]);
+
+		let checksum = 0;
+		for (const byte of Buffer.concat([
+			Buffer.from([0xe2, 0x0e, 0x00]),
+			Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00]),
+			meshBytes,
+			command,
+		])) {
+			checksum = (checksum + byte) & 0xff;
+		}
+
+		return Buffer.concat([
+			header,
+			switchBytes,
+			seqBytes,
+			Buffer.from([0x00]),
+			xlinkPayload,
+			Buffer.from([checksum, 0x7e]),
+		]);
+	}
+
 	// Mesh State Query: requests a snapshot of every device's on/off, brightness, CT, and RGB
 	// from a controller. Used on each successful TCP connect so HomeKit shows the correct
 	// state without waiting for the user to toggle a light.
@@ -889,7 +954,7 @@ export class TcpClient {
 		for (const controllerId of this.switchIdToHomeId.keys()) {
 			const seq = this.nextSeq();
 			const packet = this.buildControllerPing(controllerId, seq);
-			socket.write(packet);
+			this.writeSocket(packet, 'controller ping');
 
 			this.log.debug(
 				'[Cync TCP] Mesh-state warm-up ping: controller=0x%s seq=%d',
@@ -918,7 +983,7 @@ export class TcpClient {
 
 			const seq = this.nextSeq();
 			const packet = this.buildMeshInfoRequest(controllerId, seq);
-			this.socket.write(packet);
+			this.writeSocket(packet, 'mesh-state request');
 
 			this.log.info(
 				'[Cync TCP] Requested mesh state: controller=0x%s home=%s seq=%d packet=%s',
@@ -928,6 +993,292 @@ export class TcpClient {
 				formatHex(packet),
 			);
 		}
+	}
+
+	public async activateLightShow(
+		deviceId: string,
+		showIndex: number,
+	): Promise<boolean> {
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] activateLightShow: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn(
+					'[Cync TCP] activateLightShow: socket not ready even after reconnect attempt.',
+				);
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] activateLightShow: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+
+			if (!Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] activateLightShow: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
+					deviceId,
+					record.switch_controller,
+					record.mesh_id,
+				);
+				return false;
+			}
+
+			const controllerId = this.resolvePrimaryControllerId(
+				deviceId,
+				record.switch_controller,
+			);
+
+			if (controllerId === undefined) {
+				this.log.warn(
+					'[Cync TCP] activateLightShow: device %s missing controller (switch_controller=%o)',
+					deviceId,
+					record.switch_controller,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					1,
+					showIndex,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'light show');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Activated light show: device=%s showIndex=%d controller=0x%s seq=%d',
+					deviceId,
+					showIndex,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
+		});
+	}
+
+	public async exitLightShowMode(deviceId: string): Promise<boolean> {
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] exitLightShowMode: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn('[Cync TCP] exitLightShowMode: socket not ready.');
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] exitLightShowMode: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+			const controllerId = this.resolvePrimaryControllerId(deviceId, record.switch_controller);
+
+			if (controllerId === undefined || !Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] exitLightShowMode: device %s missing LAN fields',
+					deviceId,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					0,
+					0,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'light show exit');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Exited light show mode: device=%s controller=0x%s seq=%d',
+					deviceId,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
+		});
+	}
+
+	public async activateMusicShow(
+		deviceId: string,
+		showIndex: number,
+	): Promise<boolean> {
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] activateMusicShow: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn(
+					'[Cync TCP] activateMusicShow: socket not ready even after reconnect attempt.',
+				);
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] activateMusicShow: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+
+			if (!Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] activateMusicShow: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
+					deviceId,
+					record.switch_controller,
+					record.mesh_id,
+				);
+				return false;
+			}
+
+			const controllerId = this.resolvePrimaryControllerId(
+				deviceId,
+				record.switch_controller,
+			);
+
+			if (controllerId === undefined) {
+				this.log.warn(
+					'[Cync TCP] activateMusicShow: device %s missing controller (switch_controller=%o)',
+					deviceId,
+					record.switch_controller,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					2,
+					showIndex,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'music show');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Activated music show: device=%s showIndex=%d controller=0x%s seq=%d',
+					deviceId,
+					showIndex,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
+		});
+	}
+
+	public async exitMusicShowMode(deviceId: string): Promise<boolean> {
+		return this.enqueueCommand(async () => {
+			if (!this.config) {
+				this.log.warn('[Cync TCP] exitMusicShowMode: no config available.');
+				return false;
+			}
+
+			const connected = await this.ensureConnected();
+			if (!connected || !this.socket || this.socket.destroyed) {
+				this.log.warn('[Cync TCP] exitMusicShowMode: socket not ready.');
+				return false;
+			}
+
+			const device = this.findDevice(deviceId);
+			if (!device) {
+				this.log.warn('[Cync TCP] exitMusicShowMode: unknown deviceId=%s', deviceId);
+				return false;
+			}
+
+			const record = device as Record<string, unknown>;
+			const meshIndex = Number(record.mesh_id);
+			const controllerId = this.resolvePrimaryControllerId(deviceId, record.switch_controller);
+
+			if (controllerId === undefined || !Number.isFinite(meshIndex)) {
+				this.log.warn(
+					'[Cync TCP] exitMusicShowMode: device %s missing LAN fields',
+					deviceId,
+				);
+				return false;
+			}
+
+			const controllerCandidates = this.getControllerCandidates(deviceId, controllerId);
+
+			for (const candidateControllerId of controllerCandidates) {
+				const messageId = this.nextSeq();
+				const packet = this.buildRunModePacket(
+					candidateControllerId,
+					meshIndex,
+					0,
+					0,
+					messageId,
+				);
+
+				this.writeSocket(packet, 'music show exit');
+
+				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
+
+				this.log.info(
+					'[Cync TCP] Exited music show mode: device=%s controller=0x%s seq=%d',
+					deviceId,
+					candidateControllerId.toString(16).padStart(8, '0'),
+					messageId,
+				);
+
+				return true;
+			}
+
+			return false;
+		});
 	}
 
 	// Mesh State Response Parser: decodes the paginated 0x52 response into per-device updates.
@@ -1338,11 +1689,12 @@ export class TcpClient {
 
 	private attachSocketListeners(socket: net.Socket): void {
 		socket.on('data', (chunk) => {
-			this.log.debug(
-				'[Cync TCP] RX raw chunk bytes=%d hex=%s',
-				chunk.byteLength,
-				formatHex(chunk),
-			);
+			// Deep packet debugging only:
+			// this.log.debug(
+			//	'[Cync TCP] RX raw chunk bytes=%d hex=%s',
+			//	chunk.byteLength,
+			//	formatHex(chunk),
+			// );
 
 			this.log.debug('[Cync TCP] received %d bytes from server', chunk.byteLength);
 
@@ -1377,6 +1729,21 @@ export class TcpClient {
 		});
 	}
 
+	private writeSocket(packet: Buffer, label: string): void {
+		if (!this.socket || this.socket.destroyed) {
+			this.log.warn('[Cync TCP] %s: socket not available for write.', label);
+			return;
+		}
+
+		this.log.debug(
+			'[Cync TCP] TX raw %s bytes=%d hex=%s',
+			label,
+			packet.byteLength,
+			formatHex(packet),
+		);
+
+		this.socket.write(packet);
+	}
 
 	private processIncoming(): void {
 		while (this.readBuffer.length >= 5) {
@@ -1392,10 +1759,9 @@ export class TcpClient {
 
 			// Debug log with full hex dump so we can reverse-engineer the protocol
 			this.log.debug(
-				'[Cync TCP] frame type=0x%s len=%d body=%s',
+				'[Cync TCP] frame type=0x%s len=%d',
 				type.toString(16).padStart(2, '0'),
 				len,
-				body.toString('hex'),
 			);
 
 			if (type === 0x7b && body.length >= 6) {
@@ -1475,6 +1841,7 @@ export class TcpClient {
 		// 0x73 or 0x83 with inner subtype 0x52 is a paginated mesh-state response
 		// (reply to the request emitted by requestMeshState on connect). The cloud
 		// returns the response as 0x83 in practice.
+
 		if (
 			(type === 0x73 || type === 0x83) &&
 			frame.length >= 14 &&
@@ -1482,6 +1849,30 @@ export class TcpClient {
 		) {
 			this.parsePaginatedStateResponse(frame);
 			return;
+		}
+
+		if (type === 0x43) {
+			this.log.debug(
+				'[Cync TCP] compact frame 0x43: len=%d body=%s b0=%d b1=%d b2=%d b3=%d b4=%d b5=%d b6=%d',
+				frame.length,
+				formatHex(frame),
+				frame[0],
+				frame[1],
+				frame[2],
+				frame[3],
+				frame[4],
+				frame[5],
+				frame[6],
+			);
+		}
+
+		if ((type === 0x73 || type === 0x83) && frame.length >= 14) {
+			this.log.debug(
+				'[Cync TCP] routed frame type=0x%s innerSubtype=0x%s len=%d',
+				type.toString(16).padStart(2, '0'),
+				frame[13].toString(16).padStart(2, '0'),
+				frame.length,
+			);
 		}
 
 		if (type === 0x73 || type === 0x83) {

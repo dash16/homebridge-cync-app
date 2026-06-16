@@ -5,7 +5,7 @@
 [![npm](https://img.shields.io/npm/v/homebridge-cync-app.svg)](https://www.npmjs.com/package/homebridge-cync-app)
 [![npm downloads](https://img.shields.io/npm/dm/homebridge-cync-app.svg)](https://www.npmjs.com/package/homebridge-cync-app)
 ![node-lts](https://img.shields.io/badge/node%20LTS-20%7C22%7C24-6aa84f)
-![license](https://img.shields.io/github/license/dash16/homebridge-cync-app.svg)
+[![license](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 [![issues](https://img.shields.io/github/issues/dash16/homebridge-cync-app.svg)](https://github.com/dash16/homebridge-cync-app/issues)
 ![last commit](https://img.shields.io/github/last-commit/dash16/homebridge-cync-app.svg)

@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.5.0
+
+**Release Date:** 2026-06-15
+
+### Added
+
+* RGBIC Light Show support for compatible Cync devices.
+* HomeKit accessories for built-in Cync Light Shows.
+* Configuration options to selectively enable Light Show accessories.
+* Support for built-in Light Shows including Rainbow, Fireworks, Aurora, Party Time, Power Up, Cyber, and many others.
+
+### Changed
+
+* Light Show activation now uses native Cync LAN TCP commands.
+* Improved controller resolution and routing for RGBIC command delivery.
+* Activating a Light Show automatically synchronizes accessory state across related show accessories.
+* Accessory naming updated to better differentiate Light Show accessories from their parent devices.
+
+### Internal
+
+* Removed unused experimental Light Show upload code paths.
+* Removed unused Light Show parsing and CRC activation plumbing.
+* Consolidated accessory cleanup logic.
+* Updated RGBIC implementation documentation and reverse-engineering notes.
+* General code cleanup, linting, and maintenance improvements.
+
 ## v0.4.7
 
 **Release Date:** 2026-06-14

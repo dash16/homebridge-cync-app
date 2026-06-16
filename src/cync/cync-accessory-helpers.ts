@@ -43,9 +43,10 @@ export interface CyncAccessoryContext {
 
 		deviceType?: number;
 
-    on?: boolean;
-    brightness?: number; // 0–100 (LAN "level")
-    lastNonZeroBrightness?: number; // 1-100, used to restore dimmers after off state reports 0
+		on?: boolean;
+		brightness?: number; // 0–100 (LAN "level")
+		lastNonZeroBrightness?: number; // 1-100, used to restore dimmers after off state reports 0
+		powerCommandId?: number;
 
 		hue?: number; // 0-360
 		saturation?: number; // 0-100

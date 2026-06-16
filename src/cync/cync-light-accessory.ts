@@ -13,6 +13,72 @@ function clampNumber(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
 }
 
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const POWER_ON_BRIGHTNESS_RESTORE_DELAY_MS = 500;
+const ctMinMired = 153;
+const ctMaxMired = 500;
+
+async function restoreBrightnessAfterPowerOn(
+	env: CyncAccessoryEnv,
+	cyncMeta: NonNullable<CyncAccessoryContext['cync']>,
+	deviceName: string,
+	brightness: number,
+): Promise<void> {
+	if (!cyncMeta.deviceId) {
+		return;
+	}
+
+	const isCtMode =
+		!cyncMeta.colorActive && typeof cyncMeta.colorTemperature === 'number';
+
+	if (isCtMode) {
+		const colorTemperature = cyncMeta.colorTemperature as number;
+
+		env.log.debug(
+			'Cync: Light On.set restoring CT brightness=%d mired=%d for %s (deviceId=%s)',
+			brightness,
+			colorTemperature,
+			deviceName,
+			cyncMeta.deviceId,
+		);
+
+		await env.tcpClient.setColorTemperature(
+			cyncMeta.deviceId,
+			{
+				mired: colorTemperature,
+				brightnessPct: brightness,
+				ctMinMired,
+				ctMaxMired,
+				invertTone: true,
+			},
+			cyncMeta.deviceType,
+		);
+	} else {
+		env.log.debug(
+			'Cync: Light On.set restoring brightness=%d for %s (deviceId=%s)',
+			brightness,
+			deviceName,
+			cyncMeta.deviceId,
+		);
+
+		await env.tcpClient.setBrightness(
+			cyncMeta.deviceId,
+			brightness,
+			cyncMeta.deviceType,
+			{
+				colorActive: cyncMeta.colorActive,
+				rgb: cyncMeta.rgb,
+			},
+		);
+	}
+
+	cyncMeta.brightness = brightness;
+	cyncMeta.lastNonZeroBrightness = brightness;
+}
+
 export function configureCyncLightAccessory(
 	env: CyncAccessoryEnv,
 	mesh: CyncDeviceMesh,
@@ -130,33 +196,27 @@ export function configureCyncLightAccessory(
 
 			// Optimistic local cache; LAN update will confirm
 			cyncMeta.on = on;
+			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
+			const powerCommandId = cyncMeta.powerCommandId;
 
 			try {
 				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on });
 
 				if (
 					on &&
-					cyncMeta.deviceType === 125 &&
 					typeof restoreBrightness === 'number' &&
 					restoreBrightness > 0 &&
 					restoreBrightness < 100
 				) {
-					env.log.debug(
-						'Cync: Light On.set restoring brightness=%d for %s (deviceId=%s)',
-						restoreBrightness,
-						deviceName,
-						cyncMeta.deviceId,
-					);
-
-					await env.tcpClient.setBrightness(
-						cyncMeta.deviceId,
-						restoreBrightness,
-						cyncMeta.deviceType,
-						{
-							colorActive: cyncMeta.colorActive,
-							rgb: cyncMeta.rgb,
-						},
-					);
+					await delay(POWER_ON_BRIGHTNESS_RESTORE_DELAY_MS);
+					if (cyncMeta.powerCommandId === powerCommandId && cyncMeta.on === true) {
+						await restoreBrightnessAfterPowerOn(
+							env,
+							cyncMeta,
+							deviceName,
+							restoreBrightness,
+						);
+					}
 				}
 
 				env.markDeviceSeen(cyncMeta.deviceId);
@@ -226,6 +286,7 @@ export function configureCyncLightAccessory(
 			if (brightness > 0) {
 				cyncMeta.lastNonZeroBrightness = brightness;
 			}
+			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
 
 			env.log.info(
 				'Cync: Light Brightness.set -> %d for %s (deviceId=%s)',
@@ -359,6 +420,7 @@ export function configureCyncLightAccessory(
 			if (brightness > 0) {
 				cyncMeta.lastNonZeroBrightness = brightness;
 			}
+			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
 
 			env.log.info(
 				'Cync: Light Hue.set -> %d for %s (deviceId=%s) -> rgb=(%d,%d,%d) brightness=%d',
@@ -395,8 +457,6 @@ export function configureCyncLightAccessory(
 
 	// ----- Color Temperature (tunable white via LAN tone byte) -----
 	// HomeKit uses mireds. Typical tunable-white range is ~153–500 mired (~6500K–2000K).
-	const ctMinMired = 153;
-	const ctMaxMired = 500;
 
 	service
 		.getCharacteristic(Characteristic.ColorTemperature)
@@ -458,6 +518,7 @@ export function configureCyncLightAccessory(
 			if (brightness > 0) {
 				cyncMeta.lastNonZeroBrightness = brightness;
 			}
+			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
 
 			env.log.info(
 				'Cync: Light ColorTemperature.set -> %d mired (~%dK) for %s (deviceId=%s) brightness=%d',
@@ -553,6 +614,7 @@ export function configureCyncLightAccessory(
 			if (brightness > 0) {
 				cyncMeta.lastNonZeroBrightness = brightness;
 			}
+			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
 
 			env.log.info(
 				'Cync: Light Saturation.set -> %d for %s (deviceId=%s) -> rgb=(%d,%d,%d) brightness=%d',

@@ -63,7 +63,7 @@
 					]
 				},
 				"uniqueItems": true,
-				"default": [2]
+				"default": []
 			},
 			"exposeMusicShows": {
 				"title": "Expose Music Shows",
@@ -89,7 +89,7 @@
 					]
 				},
 				"uniqueItems": true,
-				"default": [1]
+				"default": []
 			}
 		},
 		"required": [

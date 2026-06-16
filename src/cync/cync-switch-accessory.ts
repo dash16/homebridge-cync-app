@@ -96,11 +96,7 @@ export function configureCyncSwitchAccessory(
 					return;
 				}
 
-				if (cyncMeta.colorActive && cyncMeta.rgb && typeof cyncMeta.brightness === 'number') {
-					await env.tcpClient.setColor(cyncMeta.deviceId, cyncMeta.rgb, cyncMeta.brightness);
-				} else {
-					await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on: true });
-				}
+				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on: true });
 
 				env.markDeviceSeen(cyncMeta.deviceId);
 			} catch (err) {

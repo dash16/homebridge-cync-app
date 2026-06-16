@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.7
+
+**Release Date:** 2026-06-14
+
+### Fixed
+- Fixed Cync Paddle Dimmer switches, device type 125, appearing as on/off-only accessories in HomeKit.
+- Exposed Cync Paddle Dimmer devices through the HomeKit Lightbulb service so brightness controls appear correctly.
+- Restored cached brightness when turning Cync Paddle Dimmer devices back on, preventing them from returning to 100% brightness after power cycling.
+
+### Changed
+- Removed unsupported brightness handling from HomeKit Switch accessories, since HomeKit does not expose brightness controls for Switch services.
+
+## v0.4.6
+**Release Date:** 2026-06-13
+
+### Added
+- Added brightness control support for supported Cync switch devices.
+- Added cached brightness restore behavior for Cync paddle dimmer switches.
+
+### Fixed
+- Fixed Cync paddle dimmer switches returning to 100% brightness after being turned off and back on from HomeKit.
+
 ## v0.4.5
 
 **Release Date:** 2026-06-10

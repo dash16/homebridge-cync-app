@@ -717,7 +717,93 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const meshRecord = mesh as unknown as Record<string, unknown>;
 
-				const savedLightShowsCrcMap = rawDevice?.savedLightShowsCrcMap;
+				if (this.log.debug) {
+					this.log.debug(
+						'Cync raw mesh keys for %s: %s',
+						meshName,
+						JSON.stringify(Object.keys(meshRecord).sort()),
+					);
+
+					this.log.debug(
+						'Cync raw device keys for %s: %s',
+						deviceName,
+						JSON.stringify(Object.keys(record).sort()),
+					);
+
+					if (rawDevice) {
+						this.log.debug(
+							'Cync raw inner device keys for %s: %s',
+							deviceName,
+							JSON.stringify(Object.keys(rawDevice).sort()),
+						);
+					}
+				}
+
+				const possibleMultiColorFields = [
+					'multiColorSchemes',
+					'multicolorSchemes',
+					'multi_color_schemes',
+					'schemes',
+					'savedMultiColorSchemes',
+					'savedMulticolorSchemes',
+					'schemeCrcMap',
+					'entertainmentData',
+					'entertainment',
+					'segmentLayouts',
+					'segments',
+				];
+
+				for (const field of possibleMultiColorFields) {
+					const meshValue = meshRecord[field];
+					const deviceValue = record[field];
+					const rawDeviceValue = rawDevice?.[field];
+
+					if (meshValue !== undefined) {
+						this.log.debug(
+							'Cync possible MultiColor mesh field %s for %s: %s',
+							field,
+							meshName,
+							JSON.stringify(meshValue),
+						);
+					}
+
+					if (deviceValue !== undefined) {
+						this.log.debug(
+							'Cync possible MultiColor device field %s for %s: %s',
+							field,
+							deviceName,
+							JSON.stringify(deviceValue),
+						);
+					}
+
+					if (rawDeviceValue !== undefined) {
+						this.log.debug(
+							'Cync possible MultiColor raw device field %s for %s: %s',
+							field,
+							deviceName,
+							JSON.stringify(rawDeviceValue),
+						);
+					}
+				}
+
+				const savedLightShowsCrcMap =
+					rawDevice?.savedLightShowsCrcMap ??
+					rawDevice?.savedShowCrcMap ??
+					rawDevice?.savedShowsCrcMap;
+
+				const savedMultiColorSchemes =
+					rawDevice?.savedMultiColorSchemes ??
+					rawDevice?.savedMulticolorSchemes ??
+					rawDevice?.multiColorSchemeCrcMap ??
+					rawDevice?.schemeCrcMap;
+
+				if (savedMultiColorSchemes && typeof savedMultiColorSchemes === 'object') {
+					this.log.debug(
+						'Cync RGBIC saved MultiColor scheme data for %s: %s',
+						deviceName,
+						JSON.stringify(savedMultiColorSchemes),
+					);
+				}
 
 				if (
 					savedLightShowsCrcMap &&
@@ -792,7 +878,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						const showIndex = lightShow.index;
 						const showName = lightShow.name;
 
-						const lightShowName = `${showName} (${deviceName} Light)`;
+						const lightShowName = `${showName} - ${deviceName} - Light`;
 						const lightShowUuidSeed = `cync-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
 						const lightShowUuid = this.api.hap.uuid.generate(lightShowUuidSeed);
 
@@ -866,7 +952,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						const showIndex = musicShow.index;
 						const showName = musicShow.name;
 
-						const musicShowName = `${showName} (${deviceName} Music)`;
+						const musicShowName = `${showName} - ${deviceName} - Music`;
 						const musicShowUuidSeed = `cync-musicshow-${mesh.id}-${deviceId}-${showIndex}`;
 						const musicShowUuid = this.api.hap.uuid.generate(musicShowUuidSeed);
 
@@ -932,7 +1018,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						const showIndex = customLightShow.index;
 						const showName = customLightShow.name;
 
-						const customLightShowName = `${showName} (${deviceName} Custom Light)`;
+						const customLightShowName = `${showName} - ${deviceName} - Custom Light`;
 						const customLightShowUuidSeed = `cync-custom-lightshow-${mesh.id}-${deviceId}-${showIndex}`;
 						const customLightShowUuid = this.api.hap.uuid.generate(customLightShowUuidSeed);
 
@@ -978,7 +1064,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						const showIndex = customMusicShow.index;
 						const showName = customMusicShow.name;
 
-						const customMusicShowName = `${showName} (${deviceName} Custom Music)`;
+						const customMusicShowName = `${showName} - ${deviceName} - Custom Music`;
 						const customMusicShowUuidSeed = `cync-custom-musicshow-${mesh.id}-${deviceId}-${showIndex}`;
 						const customMusicShowUuid = this.api.hap.uuid.generate(customMusicShowUuidSeed);
 

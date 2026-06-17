@@ -47,6 +47,7 @@ export type LanDeviceUpdate = {
 	deviceId: string;
 	on: boolean;
 	brightnessPct?: number;
+	lastNonZeroBrightnessPct?: number;
 	rgb?: { r: number; g: number; b: number };
 };
 
@@ -155,6 +156,7 @@ export class TcpClient {
 		controllerId: number;
 		on: boolean;
 		brightnessPct: number;
+		lastNonZeroBrightnessPct?: number;
 	} | null {
 		if (frame.length < 16) {
 			return null;
@@ -188,16 +190,19 @@ export class TcpClient {
 
 		// Treat the byte as 0–100 percent; clamp hard.
 		const brightnessPct = on ? clampNumber(levelByte, 1, 100) : 0;
+		const lastNonZeroBrightnessPct =
+			levelByte > 0 ? clampNumber(levelByte, 1, 100) : undefined;
 
 		this.log.debug(
-			'[Cync TCP] Legacy parse: controllerId=%d onFlag=%d levelByte=%d -> hkPct=%d',
+			'[Cync TCP] Legacy parse: controllerId=%d onFlag=%d levelByte=%d -> hkPct=%d lastNonZero=%s',
 			controllerId,
 			onFlag,
 			levelByte,
 			brightnessPct,
+			String(lastNonZeroBrightnessPct ?? 'none'),
 		);
 
-		return { controllerId, on, brightnessPct };
+		return { controllerId, on, brightnessPct, lastNonZeroBrightnessPct };
 	}
 
 	private parseLanSwitchUpdate(
@@ -207,6 +212,7 @@ export class TcpClient {
 		deviceId?: string;
 		on: boolean;
 		brightnessPct: number;
+		lastNonZeroBrightnessPct?: number;
 	} | null {
 		if (frame.length < 29) {
 			return null;
@@ -245,16 +251,19 @@ export class TcpClient {
 
 		// Treat the byte as 0–100 percent; clamp hard.
 		const brightnessPct = on ? clampNumber(levelByte, 1, 100) : 0;
+		const lastNonZeroBrightnessPct =
+			levelByte > 0 ? clampNumber(levelByte, 1, 100) : undefined;
 
 		this.log.debug(
-			'[Cync TCP] LAN parse bytes: typeByte=0x%s stateByte=%d levelByte=%d -> hkPct=%d',
+			'[Cync TCP] LAN parse bytes: typeByte=0x%s stateByte=%d levelByte=%d -> hkPct=%d lastNonZero=%s',
 			typeByte.toString(16).padStart(2, '0'),
 			stateByte,
 			levelByte,
 			brightnessPct,
+			String(lastNonZeroBrightnessPct ?? 'none'),
 		);
 
-		return { controllerId, deviceId, on, brightnessPct };
+		return { controllerId, deviceId, on, brightnessPct, lastNonZeroBrightnessPct };
 	}
 
 
@@ -1320,6 +1329,8 @@ export class TcpClient {
 			}
 
 			const brightnessPct = on ? clampNumber(levelByte, 1, 100) : 0;
+			const lastNonZeroBrightnessPct =
+				levelByte > 0 ? clampNumber(levelByte, 1, 100) : undefined;
 			const rgb = colorTone === 0xfe
 				? { r: rec[20], g: rec[21], b: rec[22] }
 				: undefined;
@@ -1338,6 +1349,7 @@ export class TcpClient {
 				deviceId,
 				on,
 				brightnessPct,
+				lastNonZeroBrightnessPct,
 				rgb,
 			});
 		}
@@ -1890,6 +1902,7 @@ export class TcpClient {
 					deviceId: devId,
 					on: lanParsed.on,
 					brightnessPct,
+					lastNonZeroBrightnessPct: lanParsed.lastNonZeroBrightnessPct,
 					rgb,
 				});
 				for (const [key, pending] of this.pendingPowerCommands.entries()) {

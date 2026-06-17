@@ -443,9 +443,23 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		// ----- Brightness -----
 		if (lightService) {
 			let brightnessPct: number | undefined;
+			let lastNonZeroBrightnessPct: number | undefined;
 
 			if (typeof update.brightnessPct === 'number' && Number.isFinite(update.brightnessPct)) {
 				brightnessPct = Math.max(0, Math.min(100, Math.round(update.brightnessPct)));
+			}
+			if (
+				typeof update.lastNonZeroBrightnessPct === 'number' &&
+				Number.isFinite(update.lastNonZeroBrightnessPct)
+			) {
+				lastNonZeroBrightnessPct = Math.max(
+					1,
+					Math.min(100, Math.round(update.lastNonZeroBrightnessPct)),
+				);
+			}
+
+			if (lastNonZeroBrightnessPct !== undefined) {
+				ctx.cync.lastNonZeroBrightness = lastNonZeroBrightnessPct;
 			}
 
 			if (brightnessPct !== undefined) {

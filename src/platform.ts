@@ -17,6 +17,7 @@ import {
 	type CyncAccessoryContext,
 	type CyncAccessoryEnv,
 	type CyncCapabilityProfile,
+	type CyncLightShowKind,
 	resolveDeviceType,
 	rgbToHsv,
 } from './cync/cync-accessory-helpers.js';
@@ -188,6 +189,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private readonly lightShowServicesByDeviceId = new Map<string, Array<{
 		accessory: PlatformAccessory;
 		showIndex: number;
+		showKind: CyncLightShowKind;
 	}>>();
 
 	private shouldExposeLightShows(): boolean {
@@ -238,6 +240,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		deviceId: string,
 		accessory: PlatformAccessory,
 		showIndex: number,
+		showKind: CyncLightShowKind,
 	): void {
 		const existing = this.lightShowServicesByDeviceId.get(deviceId) ?? [];
 
@@ -245,14 +248,14 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			entry => entry.accessory.UUID !== accessory.UUID,
 		);
 
-		withoutDuplicate.push({ accessory, showIndex });
+		withoutDuplicate.push({ accessory, showIndex, showKind });
 
 		this.lightShowServicesByDeviceId.set(deviceId, withoutDuplicate);
 	}
 
 	private markActiveLightShowForDevice(
 		deviceId: string,
-		activeShowIndex: number | null,
+		activeShow: { index: number; kind: CyncLightShowKind } | null,
 	): void {
 		const lightEntries = this.lightShowServicesByDeviceId.get(deviceId) ?? [];
 		const musicEntries = this.musicShowServicesByDeviceId.get(deviceId) ?? [];
@@ -260,7 +263,10 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		const Service = this.api.hap.Service;
 
 		for (const entry of lightEntries) {
-			const active = activeShowIndex !== null && entry.showIndex === activeShowIndex;
+			const active =
+				activeShow !== null &&
+				entry.showIndex === activeShow.index &&
+				entry.showKind === activeShow.kind;
 
 			entry.accessory.context.lightShowActive = active;
 
@@ -268,7 +274,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			service?.updateCharacteristic(Characteristic.On, active);
 		}
 
-		if (activeShowIndex !== null) {
+		if (activeShow !== null) {
 			for (const entry of musicEntries) {
 				entry.accessory.context.musicShowActive = false;
 
@@ -414,6 +420,9 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			if (lightService || outletService || switchService) {
 				primaryService.updateCharacteristic(Characteristic.On, update.on);
 			}
+			if (!update.on) {
+				this.clearActiveShowsForDevice(update.deviceId);
+			}
 			if (outletService && outletService.testCharacteristic(Characteristic.OutletInUse)) {
 				outletService.updateCharacteristic(Characteristic.OutletInUse, update.on);
 			}
@@ -477,7 +486,16 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				);
 
 				if (lightService.testCharacteristic(Characteristic.Brightness)) {
-					lightService.updateCharacteristic(Characteristic.Brightness, brightnessPct);
+					const homeKitBrightness =
+						brightnessPct > 0
+							? brightnessPct
+							: ctx.cync.lastNonZeroBrightness;
+					if (typeof homeKitBrightness === 'number') {
+						lightService.updateCharacteristic(
+							Characteristic.Brightness,
+							homeKitBrightness,
+						);
+					}
 				}
 			}
 		}
@@ -957,6 +975,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 							lightShowName,
 							deviceId,
 							lightShow,
+							'built-in-light',
 							(showDeviceId, showIndex) =>
 								this.client.activateLightShow(
 									showDeviceId,
@@ -1086,6 +1105,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 							customLightShowName,
 							deviceId,
 							customLightShow,
+							'custom-light',
 							(showDeviceId, showIndex) =>
 								this.client.activateLightShow(showDeviceId, showIndex),
 						);
@@ -1131,6 +1151,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 							customMultiColorSchemeName,
 							deviceId,
 							customMultiColorScheme,
+							'custom-multicolor',
 							(showDeviceId, showIndex) =>
 								this.client.activateMultiColorScheme(showDeviceId, showIndex),
 						);

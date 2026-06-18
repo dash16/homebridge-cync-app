@@ -2,7 +2,10 @@
 
 import type { PlatformAccessory, CharacteristicValue } from 'homebridge';
 
-import type { CyncAccessoryEnv } from './cync-accessory-helpers.js';
+import type {
+	CyncAccessoryEnv,
+	CyncLightShowKind,
+} from './cync-accessory-helpers.js';
 
 export const BUILT_IN_CYNC_LIGHT_SHOWS = [
 	{ index: 1, name: 'Candle' },
@@ -26,6 +29,7 @@ export function configureCyncLightShowAccessory(
 	accessoryName: string,
 	deviceId: string,
 	lightShow: Record<string, unknown>,
+	showKind: CyncLightShowKind,
 	activateLightShow: (
 		deviceId: string,
 		showIndex: number,
@@ -44,6 +48,7 @@ export function configureCyncLightShowAccessory(
 			deviceId,
 			accessory,
 			showIndex,
+			showKind,
 		);
 	}
 
@@ -69,7 +74,7 @@ export function configureCyncLightShowAccessory(
 
 	informationService?.setCharacteristic(
 		Characteristic.SerialNumber,
-		`${deviceId}-${String(lightShow.index ?? 'unknown')}`,
+		`${deviceId}-${showKind}-${String(lightShow.index ?? 'unknown')}`,
 	);
 
 	service.setCharacteristic(
@@ -105,7 +110,10 @@ export function configureCyncLightShowAccessory(
 				const activated = await activateLightShow(deviceId, showIndex);
 
 				if (activated) {
-					env.markActiveLightShowForDevice?.(deviceId, showIndex);
+					env.markActiveLightShowForDevice?.(deviceId, {
+						index: showIndex,
+						kind: showKind,
+					});
 					env.setMainAccessoryOnForDevice?.(deviceId, true);
 				}
 

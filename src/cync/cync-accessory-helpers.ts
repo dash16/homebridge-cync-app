@@ -34,6 +34,11 @@ export interface CyncCapabilityProfile {
 	source: 'deviceType' | 'cloud' | 'lan';
 }
 
+export type CyncLightShowKind =
+	| 'built-in-light'
+	| 'custom-light'
+	| 'custom-multicolor';
+
 // Context stored on the accessory
 export interface CyncAccessoryContext {
 	cync?: {
@@ -76,11 +81,12 @@ export interface CyncAccessoryEnv {
 		deviceId: string,
 		accessory: PlatformAccessory,
 		showIndex: number,
+		showKind: CyncLightShowKind,
 	) => void;
 
 	markActiveLightShowForDevice?: (
 		deviceId: string,
-		activeShowIndex: number | null,
+		activeShow: { index: number; kind: CyncLightShowKind } | null,
 	) => void;
 
 	registerMusicShowAccessoryForDevice?: (

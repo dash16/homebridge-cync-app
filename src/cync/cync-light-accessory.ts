@@ -138,6 +138,7 @@ export function configureCyncLightAccessory(
 	env.startPollingDevice(deviceId);
 
 	const Characteristic = env.api.hap.Characteristic;
+	let pendingPowerOnRestore: { brightness: number; commandId: number } | undefined;
 
 	// ----- On/Off -----
 	service
@@ -198,9 +199,19 @@ export function configureCyncLightAccessory(
 			cyncMeta.on = on;
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
 			const powerCommandId = cyncMeta.powerCommandId;
+			pendingPowerOnRestore =
+				on &&
+				typeof restoreBrightness === 'number' &&
+				restoreBrightness > 0 &&
+				restoreBrightness < 100
+					? { brightness: restoreBrightness, commandId: powerCommandId }
+					: undefined;
 
 			try {
 				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on });
+				if (!on) {
+					env.clearActiveShowsForDevice?.(cyncMeta.deviceId);
+				}
 
 				if (
 					on &&
@@ -209,7 +220,11 @@ export function configureCyncLightAccessory(
 					restoreBrightness < 100
 				) {
 					await delay(POWER_ON_BRIGHTNESS_RESTORE_DELAY_MS);
-					if (cyncMeta.powerCommandId === powerCommandId && cyncMeta.on === true) {
+					if (
+						pendingPowerOnRestore?.commandId === powerCommandId &&
+						cyncMeta.powerCommandId === powerCommandId &&
+						cyncMeta.on === true
+					) {
 						await restoreBrightnessAfterPowerOn(
 							env,
 							cyncMeta,
@@ -217,10 +232,16 @@ export function configureCyncLightAccessory(
 							restoreBrightness,
 						);
 					}
+					if (pendingPowerOnRestore?.commandId === powerCommandId) {
+						pendingPowerOnRestore = undefined;
+					}
 				}
 
 				env.markDeviceSeen(cyncMeta.deviceId);
 			} catch (err) {
+				if (pendingPowerOnRestore?.commandId === powerCommandId) {
+					pendingPowerOnRestore = undefined;
+				}
 				env.log.warn(
 					'Cync: Light On.set failed for %s (deviceId=%s): %s',
 					deviceName,
@@ -239,11 +260,14 @@ export function configureCyncLightAccessory(
 		.getCharacteristic(Characteristic.Brightness)
 		.onGet(() => {
 			const current = ctx.cync?.brightness;
+			const lastNonZero = ctx.cync?.lastNonZeroBrightness;
+			let cachedBrightness = (ctx.cync?.on ?? false) ? 100 : 0;
 
-			const cachedBrightness =
-				typeof current === 'number'
-					? current
-					: (ctx.cync?.on ?? false) ? 100 : 0;
+			if (ctx.cync?.on === false && typeof lastNonZero === 'number') {
+				cachedBrightness = lastNonZero;
+			} else if (typeof current === 'number') {
+				cachedBrightness = current;
+			}
 
 			if (env.isDeviceProbablyOffline(deviceId)) {
 				env.log.debug(
@@ -279,6 +303,26 @@ export function configureCyncLightAccessory(
 				);
 				return;
 			}
+
+			if (
+				brightness === 100 &&
+				pendingPowerOnRestore &&
+				pendingPowerOnRestore.brightness < 100
+			) {
+				env.log.debug(
+					'Cync: Light Brightness.set suppressing companion 100%% while restoring %d for %s (deviceId=%s)',
+					pendingPowerOnRestore.brightness,
+					deviceName,
+					cyncMeta.deviceId,
+				);
+				service.updateCharacteristic(
+					Characteristic.Brightness,
+					pendingPowerOnRestore.brightness,
+				);
+				return;
+			}
+
+			pendingPowerOnRestore = undefined;
 
 			// Optimistic cache
 			cyncMeta.brightness = brightness;

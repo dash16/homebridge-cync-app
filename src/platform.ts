@@ -761,7 +761,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 					if (meshValue !== undefined) {
 						this.log.debug(
-							'Cync possible MultiColor mesh field %s for %s: %s',
+							'Cync possible Segment mesh field %s for %s: %s',
 							field,
 							meshName,
 							JSON.stringify(meshValue),
@@ -770,7 +770,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 					if (deviceValue !== undefined) {
 						this.log.debug(
-							'Cync possible MultiColor device field %s for %s: %s',
+							'Cync possible Segment device field %s for %s: %s',
 							field,
 							deviceName,
 							JSON.stringify(deviceValue),
@@ -779,7 +779,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 					if (rawDeviceValue !== undefined) {
 						this.log.debug(
-							'Cync possible MultiColor raw device field %s for %s: %s',
+							'Cync possible Segment raw device field %s for %s: %s',
 							field,
 							deviceName,
 							JSON.stringify(rawDeviceValue),
@@ -801,7 +801,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				if (savedMultiColorSchemes && typeof savedMultiColorSchemes === 'object') {
 					this.log.debug(
-						'Cync RGBIC saved MultiColor scheme data for %s: %s',
+						'Cync RGBIC saved Segment scheme data for %s: %s',
 						deviceName,
 						JSON.stringify(savedMultiColorSchemes),
 					);
@@ -846,7 +846,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					: [];
 
 				this.log.debug(
-					'Cync mesh MultiColor schemes for %s: %s',
+					'Cync mesh Segment schemes for %s: %s',
 					meshName,
 					JSON.stringify(meshRecord.multiColorSchemes),
 				);

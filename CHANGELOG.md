@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.1
+
+**Release Date:** 2026-06-17
+
+### Added
+- Added support for Cync RGBIC saved segment scenes as HomeKit switch accessories.
+- Added discovery for Cync `multiColorSchemes` and per-device `savedMultiColorSchemesCrcMap`.
+- Added LAN activation for saved segment scenes using the Cync MultiColor run mode.
+
+### Changed
+- Updated RGBIC show accessory naming to avoid parentheses and use a safer `Show - Device - Type` format.
+
+### Fixed
+- Improved dimmer behavior for supported Cync dimmer devices.
+
 ## v0.5.0
 
 **Release Date:** 2026-06-15

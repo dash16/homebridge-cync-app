@@ -14,9 +14,6 @@
 ![last commit](https://img.shields.io/github/last-commit/dash16/homebridge-cync-app.svg)
 ![typescript](https://img.shields.io/badge/language-typescript-3178c6)
 
-
-# homebridge-cync-app
-
 Homebridge plugin for integrating GE Cync devices with Apple HomeKit.
 
 This plugin connects to your Cync account, discovers supported devices automatically, and exposes them to HomeKit through Homebridge. Where supported, communication is performed locally over LAN for improved responsiveness and reliability.
@@ -28,10 +25,15 @@ This plugin connects to your Cync account, discovers supported devices automatic
 - HomeKit support for GE Cync devices
 - Automatic device discovery
 - Support for lights, dimmers, switches, outlets, and light strips
-- Brightness support
-- Color temperature support
-- RGB color support where available
-- LAN-based device communication
+	- Brightness support
+	- Color temperature support
+	- RGB color support where available
+	- RGBIC Light Show support for compatible devices
+	- RGBIC Music Show support for compatible devices
+	- Optional HomeKit accessories for supported built-in shows
+- Local LAN control for supported devices
+	- Reduced cloud dependency
+	- Faster state updates and command execution
 - Child bridge compatible
 - Homebridge UI configuration support
 - Debug logging support for troubleshooting
@@ -40,15 +42,16 @@ This plugin connects to your Cync account, discovers supported devices automatic
 
 ## Supported Devices
 
-The plugin currently supports many common Cync device families, including:
+The plugin supports most common Wi-Fi Cync lighting and power devices, including:
 
 - White bulbs
 - Tunable white bulbs
 - Full-color bulbs
-- Light strips
-- Smart plugs / outlets
+- Dynamic RGBIC light strips
+- Smart plugs and outlets
 - Smart switches
-- Dimmers
+- Smart dimmers
+- Fan switches
 
 New device types can often be supported quickly once identified.
 
@@ -129,6 +132,19 @@ If a device is not discovered:
    - Product screenshot or link
    - Relevant logs
 
+
+### Authentication Issues
+
+If the **Request Verification Code** button appears unresponsive, verify that content blockers, privacy extensions, or similar browser protections are not blocking requests from the Homebridge UI.
+
+Some users have reported that Safari's built-in content blocking features can prevent authentication actions from completing. If the button does not appear to do anything:
+
+1. Temporarily disable content blockers for the Homebridge UI
+2. Refresh the page
+3. Request a new verification code again
+
+If problems persist, try a different browser and review the browser developer console for errors.
+
 ## Contributing
 
 Issues and pull requests are welcome.
@@ -150,7 +166,7 @@ Special thanks to:
 
 - [Homebridge](https://homebridge.io)
 - [nikshriv/cync_lights](https://github.com/nikshriv/cync_lights) for extensive device support research and protocol implementation reference work
-- The Homebridge community and contributors
+- Community members who provided device access, logs, testing, and protocol captures
 
 ---
 

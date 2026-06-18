@@ -845,6 +845,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						}))
 					: [];
 
+				this.log.debug(
+					'Cync mesh MultiColor schemes for %s: %s',
+					meshName,
+					JSON.stringify(meshRecord.multiColorSchemes),
+				);
+
 				const customMultiColorSchemes = Array.isArray(meshRecord.multiColorSchemes)
 					? meshRecord.multiColorSchemes
 						.map((scheme) => scheme as Record<string, unknown>)
@@ -1089,7 +1095,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						const schemeIndex = customMultiColorScheme.index;
 						const schemeName = customMultiColorScheme.name;
 
-						const customMultiColorSchemeName = `${schemeName} - ${deviceName} - MultiColor`;
+						const customMultiColorSchemeName = `${schemeName} - ${deviceName} - Segment`;
 						const customMultiColorSchemeUuidSeed = `cync-custom-multicolor-${mesh.id}-${deviceId}-${schemeIndex}`;
 						const customMultiColorSchemeUuid = this.api.hap.uuid.generate(customMultiColorSchemeUuidSeed);
 

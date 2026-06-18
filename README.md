@@ -42,7 +42,7 @@ This plugin connects to your Cync account, discovers supported devices automatic
 
 ## Supported Devices
 
-The plugin supports most common Wi-Fi Cync lighting and power devices, including:
+The plugin supports most common Cync lighting and power devices that are discovered through your Cync account, including:
 
 - White bulbs
 - Tunable white bulbs
@@ -67,7 +67,7 @@ If a device appears incorrectly in HomeKit or is missing functionality, please o
 - Node.js 20 or newer
 - Homebridge v1.8.0 or newer
 - A GE Cync account
-- At least one compatible Cync Wi-Fi device on the network
+- At least one compatible Cync device available in the Cync app
 
 ---
 

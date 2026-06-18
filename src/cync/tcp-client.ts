@@ -1086,22 +1086,22 @@ export class TcpClient {
 		});
 	}
 
-	public async exitLightShowMode(deviceId: string): Promise<boolean> {
+	public async exitRunMode(deviceId: string): Promise<boolean> {
 		return this.enqueueCommand(async () => {
 			if (!this.config) {
-				this.log.warn('[Cync TCP] exitLightShowMode: no config available.');
+				this.log.warn('[Cync TCP] exitRunMode: no config available.');
 				return false;
 			}
 
 			const connected = await this.ensureConnected();
 			if (!connected || !this.socket || this.socket.destroyed) {
-				this.log.warn('[Cync TCP] exitLightShowMode: socket not ready.');
+				this.log.warn('[Cync TCP] exitRunMode: socket not ready.');
 				return false;
 			}
 
 			const device = this.findDevice(deviceId);
 			if (!device) {
-				this.log.warn('[Cync TCP] exitLightShowMode: unknown deviceId=%s', deviceId);
+				this.log.warn('[Cync TCP] exitRunMode: unknown deviceId=%s', deviceId);
 				return false;
 			}
 
@@ -1111,7 +1111,7 @@ export class TcpClient {
 
 			if (controllerId === undefined || !Number.isFinite(meshIndex)) {
 				this.log.warn(
-					'[Cync TCP] exitLightShowMode: device %s missing LAN fields',
+					'[Cync TCP] exitRunMode: device %s missing LAN fields',
 					deviceId,
 				);
 				return false;
@@ -1129,12 +1129,12 @@ export class TcpClient {
 					messageId,
 				);
 
-				this.writeSocket(packet, 'light show exit');
+				this.writeSocket(packet, 'run mode exit');
 
 				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
 
 				this.log.info(
-					'[Cync TCP] Exited light show mode: device=%s controller=0x%s seq=%d',
+					'[Cync TCP] Exited run mode: device=%s controller=0x%s seq=%d',
 					deviceId,
 					candidateControllerId.toString(16).padStart(8, '0'),
 					messageId,
@@ -1229,33 +1229,53 @@ export class TcpClient {
 		});
 	}
 
-	public async exitMusicShowMode(deviceId: string): Promise<boolean> {
+	public async activateMultiColorScheme(
+		deviceId: string,
+		schemeIndex: number,
+	): Promise<boolean> {
 		return this.enqueueCommand(async () => {
 			if (!this.config) {
-				this.log.warn('[Cync TCP] exitMusicShowMode: no config available.');
+				this.log.warn('[Cync TCP] activateMultiColorScheme: no config available.');
 				return false;
 			}
 
 			const connected = await this.ensureConnected();
 			if (!connected || !this.socket || this.socket.destroyed) {
-				this.log.warn('[Cync TCP] exitMusicShowMode: socket not ready.');
+				this.log.warn(
+					'[Cync TCP] activateMultiColorScheme: socket not ready even after reconnect attempt.',
+				);
 				return false;
 			}
 
 			const device = this.findDevice(deviceId);
 			if (!device) {
-				this.log.warn('[Cync TCP] exitMusicShowMode: unknown deviceId=%s', deviceId);
+				this.log.warn('[Cync TCP] activateMultiColorScheme: unknown deviceId=%s', deviceId);
 				return false;
 			}
 
 			const record = device as Record<string, unknown>;
 			const meshIndex = Number(record.mesh_id);
-			const controllerId = this.resolvePrimaryControllerId(deviceId, record.switch_controller);
 
-			if (controllerId === undefined || !Number.isFinite(meshIndex)) {
+			if (!Number.isFinite(meshIndex)) {
 				this.log.warn(
-					'[Cync TCP] exitMusicShowMode: device %s missing LAN fields',
+					'[Cync TCP] activateMultiColorScheme: device %s missing LAN fields (switch_controller=%o mesh_id=%o)',
 					deviceId,
+					record.switch_controller,
+					record.mesh_id,
+				);
+				return false;
+			}
+
+			const controllerId = this.resolvePrimaryControllerId(
+				deviceId,
+				record.switch_controller,
+			);
+
+			if (controllerId === undefined) {
+				this.log.warn(
+					'[Cync TCP] activateMultiColorScheme: device %s missing controller (switch_controller=%o)',
+					deviceId,
+					record.switch_controller,
 				);
 				return false;
 			}
@@ -1267,18 +1287,19 @@ export class TcpClient {
 				const packet = this.buildRunModePacket(
 					candidateControllerId,
 					meshIndex,
-					0,
-					0,
+					4,
+					schemeIndex,
 					messageId,
 				);
 
-				this.writeSocket(packet, 'music show exit');
+				this.writeSocket(packet, 'multi color scheme');
 
 				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
 
 				this.log.info(
-					'[Cync TCP] Exited music show mode: device=%s controller=0x%s seq=%d',
+					'[Cync TCP] Activated MultiColor scheme: device=%s schemeIndex=%d controller=0x%s seq=%d',
 					deviceId,
+					schemeIndex,
 					candidateControllerId.toString(16).padStart(8, '0'),
 					messageId,
 				);

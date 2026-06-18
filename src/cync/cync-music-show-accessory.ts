@@ -116,7 +116,7 @@ export function configureCyncMusicShowAccessory(
 				showIndex,
 			);
 
-			await env.tcpClient.exitMusicShowMode(deviceId);
+			await env.tcpClient.exitRunMode(deviceId);
 			await env.tcpClient.setSwitchState(deviceId, { on: false });
 
 			env.markActiveMusicShowForDevice?.(deviceId, null);

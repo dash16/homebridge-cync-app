@@ -50,6 +50,7 @@ type CyncShowKind =
 	| 'built-in-light'
 	| 'built-in-music'
 	| 'custom-light'
+	| 'custom-multicolor'
 	| 'custom-music';
 
 function getDefaultCapabilitiesForDeviceType(): CyncCapabilityProfile {
@@ -792,6 +793,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					rawDevice?.savedShowsCrcMap;
 
 				const savedMultiColorSchemes =
+					rawDevice?.savedMultiColorSchemesCrcMap ??
 					rawDevice?.savedMultiColorSchemes ??
 					rawDevice?.savedMulticolorSchemes ??
 					rawDevice?.multiColorSchemeCrcMap ??
@@ -822,6 +824,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						? savedLightShowsCrcMap as Record<string, unknown>
 						: {};
 
+				const savedMultiColorSchemesCrcMap =
+					savedMultiColorSchemes &&
+					typeof savedMultiColorSchemes === 'object'
+						? savedMultiColorSchemes as Record<string, unknown>
+						: {};
+
 				const customLightShows = Array.isArray(meshRecord.lightShows)
 					? meshRecord.lightShows
 						.map((show) => show as Record<string, unknown>)
@@ -834,6 +842,21 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 							index: show.index as number,
 							name: show.name as string,
 							crc: savedShowCrcMap[String(show.index)] as number,
+						}))
+					: [];
+
+				const customMultiColorSchemes = Array.isArray(meshRecord.multiColorSchemes)
+					? meshRecord.multiColorSchemes
+						.map((scheme) => scheme as Record<string, unknown>)
+						.filter((scheme) =>
+							typeof scheme.index === 'number' &&
+							typeof scheme.name === 'string' &&
+							typeof savedMultiColorSchemesCrcMap[String(scheme.index)] === 'number',
+						)
+						.map((scheme) => ({
+							index: scheme.index as number,
+							name: scheme.name as string,
+							crc: savedMultiColorSchemesCrcMap[String(scheme.index)] as number,
 						}))
 					: [];
 
@@ -853,12 +876,14 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					: [];
 
 				this.log.debug(
-					'Cync custom show discovery for %s: expose=%s light=%d music=%d crcKeys=%s',
+					'Cync custom show discovery for %s: expose=%s light=%d multiColor=%d music=%d showCrcKeys=%s multiColorCrcKeys=%s',
 					deviceName,
 					String(this.shouldExposeCustomShows()),
 					customLightShows.length,
+					customMultiColorSchemes.length,
 					customMusicShows.length,
 					JSON.stringify(Object.keys(savedShowCrcMap)),
+					JSON.stringify(Object.keys(savedMultiColorSchemesCrcMap)),
 				);
 
 				const enabledLightShowIndexes = this.getEnabledLightShowIndexes();
@@ -1060,6 +1085,51 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						);
 					}
 
+					for (const customMultiColorScheme of customMultiColorSchemes) {
+						const schemeIndex = customMultiColorScheme.index;
+						const schemeName = customMultiColorScheme.name;
+
+						const customMultiColorSchemeName = `${schemeName} - ${deviceName} - MultiColor`;
+						const customMultiColorSchemeUuidSeed = `cync-custom-multicolor-${mesh.id}-${deviceId}-${schemeIndex}`;
+						const customMultiColorSchemeUuid = this.api.hap.uuid.generate(customMultiColorSchemeUuidSeed);
+
+						let customMultiColorSchemeAccessory = this.accessories.find(
+							acc => acc.UUID === customMultiColorSchemeUuid,
+						);
+
+						if (!customMultiColorSchemeAccessory) {
+							customMultiColorSchemeAccessory = new this.api.platformAccessory(
+								customMultiColorSchemeName,
+								customMultiColorSchemeUuid,
+							);
+
+							this.api.registerPlatformAccessories(
+								'homebridge-cync-app',
+								'CyncAppPlatform',
+								[customMultiColorSchemeAccessory],
+							);
+
+							this.accessories.push(customMultiColorSchemeAccessory);
+						}
+
+						customMultiColorSchemeAccessory.context.device = device;
+						customMultiColorSchemeAccessory.context.lightShow = customMultiColorScheme;
+						customMultiColorSchemeAccessory.context.parentDeviceId = deviceId;
+						customMultiColorSchemeAccessory.context.showKind = 'custom-multicolor';
+
+						configureCyncLightShowAccessory(
+							this.accessoryEnv,
+							mesh,
+							device,
+							customMultiColorSchemeAccessory,
+							customMultiColorSchemeName,
+							deviceId,
+							customMultiColorScheme,
+							(showDeviceId, showIndex) =>
+								this.client.activateMultiColorScheme(showDeviceId, showIndex),
+						);
+					}
+
 					for (const customMusicShow of customMusicShows) {
 						const showIndex = customMusicShow.index;
 						const showName = customMusicShow.name;
@@ -1152,6 +1222,22 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					'custom-light',
 					'cync-custom-lightshow',
 					'custom light show',
+				);
+
+				const enabledCustomMultiColorIndexesForCleanup =
+					this.shouldExposeCustomShows() &&
+					typeof deviceType === 'number' &&
+					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+						? new Set(customMultiColorSchemes.map((scheme) => scheme.index))
+						: new Set<number>();
+
+				this.cleanupDisabledShowAccessoriesForDevice(
+					String(mesh.id),
+					deviceId,
+					enabledCustomMultiColorIndexesForCleanup,
+					'custom-multicolor',
+					'cync-custom-multicolor',
+					'custom MultiColor scheme',
 				);
 
 				const enabledCustomMusicShowIndexesForCleanup =

@@ -119,7 +119,7 @@ export function configureCyncLightShowAccessory(
 				showIndex,
 			);
 
-			await env.tcpClient.exitLightShowMode(deviceId);
+			await env.tcpClient.exitRunMode(deviceId);
 			await env.tcpClient.setSwitchState(deviceId, { on: false });
 
 			env.markActiveLightShowForDevice?.(deviceId, null);

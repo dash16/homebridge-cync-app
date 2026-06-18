@@ -638,6 +638,7 @@ export class CyncClient {
 
 				(mesh as Record<string, unknown>).lightShows = propsRecord.lightShows;
 				(mesh as Record<string, unknown>).musicShows = propsRecord.musicShows;
+				(mesh as Record<string, unknown>).multiColorSchemes = propsRecord.multiColorSchemes;
 
 				type DeviceProps = Record<string, unknown>;
 				const bulbsArray = (props as DeviceProps).bulbsArray as unknown;
@@ -826,6 +827,13 @@ export class CyncClient {
 		showIndex: number,
 	): Promise<boolean> {
 		return this.tcpClient.activateMusicShow(deviceId, showIndex);
+	}
+
+	public async activateMultiColorScheme(
+		deviceId: string,
+		schemeIndex: number,
+	): Promise<boolean> {
+		return this.tcpClient.activateMultiColorScheme(deviceId, schemeIndex);
 	}
 
 	public async startTransport(

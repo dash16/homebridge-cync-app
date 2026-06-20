@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.5.3
+
+**Release Date:** 2026-06-20
+
+### Added
+- Expanded Light Show support to **73** device types using capability data derived from the Cync APK.
+- Expanded Music Show support to the **16** compatible device types identified by the Cync APK.
+
+### Fixed
+- Separated Light Show and Music Show capability checks so light-only devices, including 6-inch recessed fixtures, no longer expose unsupported Music Show or Segment scene accessories.
+
+## v0.5.2
+
+**Release Date:** 2026-06-18
+
+### Fixed
+- Preserved the last non-zero brightness level for supported dimmable devices when powered off.
+- Prevented HomeKit companion brightness updates from overriding restored brightness with 100% after power-on.
+- Corrected RGBIC Segment scene state tracking when Segment scenes share numeric indexes with Light Shows or Custom Shows.
+- Automatically clears active Light Show, Music Show, Custom Show, and Segment scene accessories when the parent light is turned off.
+- Applied the same scene cleanup behavior to Off states reported via LAN updates from the Cync app or physical controls.
+
+### Changed
+- Improved synchronization between RGBIC scenes and the primary light accessory across HomeKit, the Cync app, and direct device control.
+
 ## v0.5.1
 
 **Release Date:** 2026-06-17

@@ -46,14 +46,20 @@ The current implementation does not upload or edit show definitions. Saved Custo
 
 ## Compatible Device Types
 
-The branch currently exposes show switches for:
+Show support is derived from the Cync Android SDK `DeviceType` capability
+table. `Capability.C` identifies Light Show support and `Capability.E`
+identifies Music Show support. The plugin keeps these lists separate because
+many full-color devices support Light Shows without supporting Music Shows.
+
+Music Show-capable device types (also Light Show capable):
 
 ```text
-76  Outdoor 48" dynamic light strip
-123 Light strip
+71, 72, 73, 74, 75, 76, 110, 123, 141, 155, 157, 158, 159, 166, 167, 168
 ```
 
-Additional RGBIC-capable device types can be added to `CYNC_LIGHT_SHOW_DEVICE_TYPES` after validation.
+The complete SDK-derived lists live in `src/cync/show-capabilities.ts`.
+Custom Light Shows use the Light Show capability, while Custom Music Shows and
+multicolor Segment schemes use the Music Show/dynamic-device capability.
 
 ## Notes For Future Show Editing
 

@@ -1,5 +1,6 @@
 // src/cync/device-classifier.ts
 // Cync Device Classifier: Centralizes accessory type selection and classification logging context
+import { supportsCyncLightShows } from './show-capabilities.js';
 
 type CyncAccessoryType = 'light' | 'fan' | 'outlet' | 'switch' | 'ignored' | 'unsupported';
 
@@ -112,7 +113,10 @@ export function classifyCyncDevice(
 		};
 	}
 
-	if (deviceType !== undefined && CYNC_LIGHT_DEVICE_TYPES.has(deviceType)) {
+	if (
+		deviceType !== undefined &&
+		(CYNC_LIGHT_DEVICE_TYPES.has(deviceType) || supportsCyncLightShows(deviceType))
+	) {
 		return {
 			accessoryType: 'light',
 			deviceType,

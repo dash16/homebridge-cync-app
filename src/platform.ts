@@ -34,6 +34,10 @@ import {
 	configureCyncMusicShowAccessory,
 } from './cync/cync-music-show-accessory.js';
 import { classifyCyncDevice } from './cync/device-classifier.js';
+import {
+	supportsCyncLightShows,
+	supportsCyncMusicShows,
+} from './cync/show-capabilities.js';
 
 const toCyncLogger = (log: Logger): CyncLogger => ({
 	debug: log.debug.bind(log),
@@ -41,11 +45,6 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 	warn: log.warn.bind(log),
 	error: log.error.bind(log),
 });
-
-const CYNC_LIGHT_SHOW_DEVICE_TYPES = new Set<number>([
-	76, // Outdoor 48" dynamic light strip
-	123, // Light strip
-]);
 
 type CyncShowKind =
 	| 'built-in-light'
@@ -718,6 +717,8 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const deviceType = resolveDeviceType(device);
 				const classification = classifyCyncDevice(device, deviceType);
+				const supportsLightShows = supportsCyncLightShows(deviceType);
+				const supportsMusicShows = supportsCyncMusicShows(deviceType);
 
 				this.log.debug(
 					'Cync device classification: ' +
@@ -920,8 +921,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				if (
 					this.shouldExposeLightShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsLightShows
 				) {
 					for (const lightShow of lightShows) {
 						const showIndex = lightShow.index;
@@ -995,8 +995,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				if (
 					this.shouldExposeMusicShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsMusicShows
 				) {
 					for (const musicShow of musicShows) {
 						const showIndex = musicShow.index;
@@ -1061,8 +1060,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				if (
 					this.shouldExposeCustomShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsLightShows
 				) {
 					for (const customLightShow of customLightShows) {
 						const showIndex = customLightShow.index;
@@ -1111,7 +1109,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						);
 					}
 
-					for (const customMultiColorScheme of customMultiColorSchemes) {
+					for (const customMultiColorScheme of supportsMusicShows ? customMultiColorSchemes : []) {
 						const schemeIndex = customMultiColorScheme.index;
 						const schemeName = customMultiColorScheme.name;
 
@@ -1157,7 +1155,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						);
 					}
 
-					for (const customMusicShow of customMusicShows) {
+					for (const customMusicShow of supportsMusicShows ? customMusicShows : []) {
 						const showIndex = customMusicShow.index;
 						const showName = customMusicShow.name;
 
@@ -1205,8 +1203,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const enabledLightShowIndexesForCleanup =
 					this.shouldExposeLightShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsLightShows
 						? new Set(lightShows.map((lightShow) => lightShow.index))
 						: new Set<number>();
 
@@ -1221,8 +1218,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const enabledMusicShowIndexesForCleanup =
 					this.shouldExposeMusicShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsMusicShows
 						? new Set(musicShows.map((musicShow) => musicShow.index))
 						: new Set<number>();
 
@@ -1237,8 +1233,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const enabledCustomLightShowIndexesForCleanup =
 					this.shouldExposeCustomShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsLightShows
 						? new Set(customLightShows.map((customLightShow) => customLightShow.index))
 						: new Set<number>();
 
@@ -1253,8 +1248,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const enabledCustomMultiColorIndexesForCleanup =
 					this.shouldExposeCustomShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsMusicShows
 						? new Set(customMultiColorSchemes.map((scheme) => scheme.index))
 						: new Set<number>();
 
@@ -1269,8 +1263,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const enabledCustomMusicShowIndexesForCleanup =
 					this.shouldExposeCustomShows() &&
-					typeof deviceType === 'number' &&
-					CYNC_LIGHT_SHOW_DEVICE_TYPES.has(deviceType)
+					supportsMusicShows
 						? new Set(customMusicShows.map((customMusicShow) => customMusicShow.index))
 						: new Set<number>();
 

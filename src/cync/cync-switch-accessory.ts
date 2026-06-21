@@ -26,6 +26,18 @@ export function configureCyncSwitchAccessory(
 		accessory.removeService(existingLight);
 	}
 
+	const existingOutlet = accessory.getService(env.api.hap.Service.Outlet);
+	if (existingOutlet) {
+		accessory.removeService(existingOutlet);
+	}
+
+	const existingFan = accessory.getService(env.api.hap.Service.Fanv2);
+	if (existingFan) {
+		accessory.removeService(existingFan);
+	}
+
+	accessory.category = env.api.hap.Categories.SWITCH;
+
 	applyAccessoryInformationFromCyncDevice(env.api, accessory, device, deviceName, deviceId);
 
 	// Ensure context is initialized

@@ -46,8 +46,8 @@ The current implementation does not upload or edit show definitions. Saved Custo
 
 ## Compatible Device Types
 
-Show support is derived from the Cync Android SDK `DeviceType` capability
-table. `Capability.C` identifies Light Show support and `Capability.E`
+Show support is derived from the `DeviceType` capability table found in a
+decompiled Cync Android APK. `Capability.C` identifies Light Show support and `Capability.E`
 identifies Music Show support. The plugin keeps these lists separate because
 many full-color devices support Light Shows without supporting Music Shows.
 
@@ -57,9 +57,9 @@ Music Show-capable device types (also Light Show capable):
 71, 72, 73, 74, 75, 76, 110, 123, 141, 155, 157, 158, 159, 166, 167, 168
 ```
 
-The complete SDK-derived lists live in `src/cync/show-capabilities.ts`.
+The complete APK-derived lists live in `src/cync/device-capabilities.ts`.
 Custom Light Shows use the Light Show capability, while Custom Music Shows and
-multicolor Segment schemes use the Music Show/dynamic-device capability.
+multicolor Segment schemes use their corresponding APK-derived capabilities.
 
 ## Notes For Future Show Editing
 

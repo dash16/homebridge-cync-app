@@ -8,6 +8,7 @@ import {
 	miredToKelvin,
 	resolveDeviceType,
 } from './cync-accessory-helpers.js';
+import { getCyncApkDeviceProfile } from './device-capabilities.js';
 
 function clampNumber(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
@@ -98,6 +99,16 @@ export function configureCyncLightAccessory(
 		accessory.removeService(existingSwitch);
 	}
 
+	const existingOutlet = accessory.getService(env.api.hap.Service.Outlet);
+	if (existingOutlet) {
+		accessory.removeService(existingOutlet);
+	}
+
+	const existingFan = accessory.getService(env.api.hap.Service.Fanv2);
+	if (existingFan) {
+		accessory.removeService(existingFan);
+	}
+
 	const service =
     accessory.getService(env.api.hap.Service.Lightbulb) ||
     accessory.addService(env.api.hap.Service.Lightbulb, deviceName);
@@ -120,6 +131,7 @@ export function configureCyncLightAccessory(
 	};
 	// Persist deviceType in context so TcpClient can encode correctly for LAN packets.
 	const resolvedDeviceType = resolveDeviceType(device);
+	const apkProfile = getCyncApkDeviceProfile(resolvedDeviceType);
 
 	if (typeof resolvedDeviceType === 'number' && Number.isFinite(resolvedDeviceType)) {
 		ctx.cync.deviceType = resolvedDeviceType;
@@ -130,6 +142,16 @@ export function configureCyncLightAccessory(
 			deviceName,
 			deviceId,
 		);
+	}
+
+	if (apkProfile) {
+		ctx.cync.capabilities = {
+			isLight: apkProfile.accessoryType === 'light',
+			supportsBrightness: apkProfile.supportsBrightness,
+			supportsColor: apkProfile.supportsColor,
+			supportsCt: apkProfile.supportsCt,
+			source: 'deviceType',
+		};
 	}
 
 	// Remember mapping for LAN updates
@@ -201,6 +223,7 @@ export function configureCyncLightAccessory(
 			const powerCommandId = cyncMeta.powerCommandId;
 			pendingPowerOnRestore =
 				on &&
+				(apkProfile?.supportsBrightness ?? true) &&
 				typeof restoreBrightness === 'number' &&
 				restoreBrightness > 0 &&
 				restoreBrightness < 100
@@ -692,4 +715,22 @@ export function configureCyncLightAccessory(
 				);
 			}
 		});
+
+	// Remove optional HomeKit controls that the APK table says this device cannot handle.
+	// Unknown future device types retain the legacy behavior until cloud/LAN data
+	// can promote their capabilities.
+	if (apkProfile && !apkProfile.supportsBrightness && service.testCharacteristic(Characteristic.Brightness)) {
+		service.removeCharacteristic(service.getCharacteristic(Characteristic.Brightness));
+	}
+	if (apkProfile && !apkProfile.supportsColor) {
+		if (service.testCharacteristic(Characteristic.Hue)) {
+			service.removeCharacteristic(service.getCharacteristic(Characteristic.Hue));
+		}
+		if (service.testCharacteristic(Characteristic.Saturation)) {
+			service.removeCharacteristic(service.getCharacteristic(Characteristic.Saturation));
+		}
+	}
+	if (apkProfile && !apkProfile.supportsCt && service.testCharacteristic(Characteristic.ColorTemperature)) {
+		service.removeCharacteristic(service.getCharacteristic(Characteristic.ColorTemperature));
+	}
 }

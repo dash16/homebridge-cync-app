@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.6.0
+
+**Release Date:** 2026-06-21
+
+### Added
+- Added APK-derived product categorization and dimming, color-temperature, RGB, fan-speed, and segmented-control capabilities for **156** known device types.
+- Added support for additional APK-listed plugs, switches, dimmers, and fan controllers without requiring individual device reports.
+
+### Fixed
+- Prevented known lights from exposing unsupported Brightness, Color Temperature, Hue, or Saturation controls.
+- Removed stale HomeKit services when an APK-derived device category differs from a previously cached classification.
+- Configured all physical Cync devices before optional show accessories so bridge-capacity limits cannot prevent later lights, switches, outlets, or fans from initializing.
+- Stopped optional show discovery cleanly when Homebridge reaches its 149-accessory bridge limit instead of aborting discovery and reporting a misleading cloud-login failure.
+
+### Changed
+- Corrected capability-table attribution from SDK-derived to decompiled APK-derived.
+
 ## v0.5.3
 
 **Release Date:** 2026-06-20

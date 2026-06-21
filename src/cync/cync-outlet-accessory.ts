@@ -34,9 +34,16 @@ export function configureCyncOutletAccessory(
 		accessory.removeService(existingLight);
 	}
 
+	const existingFan = accessory.getService(env.api.hap.Service.Fanv2);
+	if (existingFan) {
+		accessory.removeService(existingFan);
+	}
+
 	const service =
 		accessory.getService(env.api.hap.Service.Outlet) ||
 		accessory.addService(env.api.hap.Service.Outlet, deviceName);
+
+	accessory.category = env.api.hap.Categories.OUTLET;
 
 	applyAccessoryInformationFromCyncDevice(env.api, accessory, device, deviceName, deviceId);
 

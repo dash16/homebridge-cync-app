@@ -10,7 +10,7 @@ import type { LanDeviceUpdate } from './cync/tcp-client.js';
 import { PLATFORM_NAME } from './settings.js';
 import { CyncClient } from './cync/cync-client.js';
 import { ConfigClient } from './cync/config-client.js';
-import type { CyncCloudConfig } from './cync/config-client.js';
+import type { CyncCloudConfig, CyncDevice, CyncDeviceMesh } from './cync/config-client.js';
 import { TcpClient } from './cync/tcp-client.js';
 import type { CyncLogger } from './cync/config-client.js';
 import {
@@ -34,10 +34,13 @@ import {
 	configureCyncMusicShowAccessory,
 } from './cync/cync-music-show-accessory.js';
 import { classifyCyncDevice } from './cync/device-classifier.js';
+import type { CyncDeviceClassification } from './cync/device-classifier.js';
 import {
+	getCyncApkDeviceProfile,
 	supportsCyncLightShows,
 	supportsCyncMusicShows,
-} from './cync/show-capabilities.js';
+	supportsCyncSegmentedControl,
+} from './cync/device-capabilities.js';
 
 const toCyncLogger = (log: Logger): CyncLogger => ({
 	debug: log.debug.bind(log),
@@ -53,14 +56,25 @@ type CyncShowKind =
 	| 'custom-multicolor'
 	| 'custom-music';
 
-function getDefaultCapabilitiesForDeviceType(): CyncCapabilityProfile {
-	const isLight = false;
+interface ResolvedPlatformDevice {
+	record: Record<string, unknown>;
+	deviceId: string;
+	deviceName: string;
+	uuidSeed: string;
+	uuid: string;
+	deviceType?: number;
+	classification: CyncDeviceClassification;
+}
+
+function getDefaultCapabilitiesForDeviceType(deviceType?: number): CyncCapabilityProfile {
+	const apkProfile = getCyncApkDeviceProfile(deviceType);
+	const isLight = apkProfile?.accessoryType === 'light';
 
 	return {
 		isLight,
-		supportsBrightness: false,
-		supportsColor: false,
-		supportsCt: false,
+		supportsBrightness: apkProfile?.supportsBrightness ?? false,
+		supportsColor: apkProfile?.supportsColor ?? false,
+		supportsCt: apkProfile?.supportsCt ?? false,
 		source: 'deviceType',
 	};
 }
@@ -105,6 +119,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private readonly deviceIdToAccessory = new Map<string, PlatformAccessory>();
 	private readonly deviceLastSeen = new Map<string, number>();
 	private readonly devicePollTimers = new Map<string, NodeJS.Timeout>();
+	private showAccessoryRegistrationDisabled = false;
 
 	private readonly offlineTimeoutMs = 30 * 60 * 1000;
 	private readonly pollIntervalMs = 60_000; // 60 seconds
@@ -393,7 +408,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		const ctx = accessory.context as CyncAccessoryContext;
 		ctx.cync = ctx.cync ?? { meshId: '', deviceId: update.deviceId };
 		if (!ctx.cync.capabilities) {
-			ctx.cync.capabilities = getDefaultCapabilitiesForDeviceType();
+			ctx.cync.capabilities = getDefaultCapabilitiesForDeviceType(ctx.cync.deviceType);
 		}
 		const promoted = promoteCapabilitiesFromLan(ctx.cync.capabilities, update);
 		if (promoted) {
@@ -672,10 +687,176 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		}
 	}
 
+	private resolvePlatformDevice(
+		mesh: CyncDeviceMesh,
+		device: CyncDevice,
+	): ResolvedPlatformDevice {
+		const record = device as unknown as Record<string, unknown>;
+		const deviceId =
+			typeof record.device_id === 'string'
+				? record.device_id
+				: typeof record.device_id === 'number'
+					? String(record.device_id)
+					: typeof record.id === 'string'
+						? record.id
+						: typeof record.id === 'number'
+							? String(record.id)
+							: typeof record.mac === 'string'
+								? record.mac
+								: typeof record.sn === 'string'
+									? record.sn
+									: `${mesh.id}-${String(record.product_id ?? 'unknown')}`;
+
+		const preferredName =
+			(typeof record.name === 'string' ? record.name : undefined) ??
+			(typeof record.displayName === 'string' ? record.displayName : undefined);
+		const deviceName = preferredName || `Cync Device ${deviceId}`;
+		const uuidSeed = `cync-${mesh.id}-${deviceId}`;
+		const uuid = this.api.hap.uuid.generate(uuidSeed);
+		const deviceType = resolveDeviceType(device);
+
+		return {
+			record,
+			deviceId,
+			deviceName,
+			uuidSeed,
+			uuid,
+			deviceType,
+			classification: classifyCyncDevice(device, deviceType),
+		};
+	}
+
+	private configurePrimaryAccessory(
+		mesh: CyncDeviceMesh,
+		device: CyncDevice,
+	): void {
+		const {
+			deviceId,
+			deviceName,
+			uuidSeed,
+			uuid,
+			deviceType,
+			classification,
+		} = this.resolvePlatformDevice(mesh, device);
+		const deviceTypeStr = typeof deviceType === 'number' ? String(deviceType) : 'unknown';
+
+		if (classification.accessoryType === 'ignored') {
+			this.log.info(
+				'Cync: ignoring controller device %s (deviceType=%s, deviceId=%s)',
+				deviceName,
+				deviceTypeStr,
+				deviceId,
+			);
+			return;
+		}
+
+		if (classification.accessoryType === 'unsupported') {
+			this.log.warn(
+				'Cync: unsupported device %s (deviceType=%s, deviceId=%s); skipping',
+				deviceName,
+				deviceTypeStr,
+				deviceId,
+			);
+			return;
+		}
+
+		let accessory = this.accessories.find(acc => acc.UUID === uuid);
+
+		if (accessory) {
+			this.log.info('Cync: using cached accessory for %s (%s)', deviceName, uuidSeed);
+		} else {
+			this.log.info('Cync: registering new accessory for %s (%s)', deviceName, uuidSeed);
+			accessory = new this.api.platformAccessory(deviceName, uuid);
+			this.api.registerPlatformAccessories(
+				'homebridge-cync-app',
+				'CyncAppPlatform',
+				[accessory],
+			);
+			this.accessories.push(accessory);
+		}
+
+		this.deviceIdToAccessory.set(deviceId, accessory);
+
+		if (classification.accessoryType === 'fan') {
+			this.log.info(
+				'Cync: configuring %s as Fan (deviceType=%s, deviceId=%s)',
+				deviceName,
+				deviceTypeStr,
+				deviceId,
+			);
+			configureCyncFanAccessory(this.accessoryEnv, mesh, device, accessory, deviceName, deviceId);
+		} else if (classification.accessoryType === 'light') {
+			this.log.info(
+				'Cync: configuring %s as Lightbulb (deviceType=%s, deviceId=%s)',
+				deviceName,
+				deviceTypeStr,
+				deviceId,
+			);
+			configureCyncLightAccessory(this.accessoryEnv, mesh, device, accessory, deviceName, deviceId);
+		} else if (classification.accessoryType === 'outlet') {
+			this.log.info(
+				'Cync: configuring %s as Outlet (deviceType=%s, deviceId=%s)',
+				deviceName,
+				deviceTypeStr,
+				deviceId,
+			);
+			configureCyncOutletAccessory(this.accessoryEnv, mesh, device, accessory, deviceName, deviceId);
+		} else {
+			this.log.info(
+				'Cync: configuring %s as Switch (deviceType=%s, deviceId=%s)',
+				deviceName,
+				deviceTypeStr,
+				deviceId,
+			);
+			configureCyncSwitchAccessory(this.accessoryEnv, mesh, device, accessory, deviceName, deviceId);
+		}
+	}
+
+	private registerOptionalShowAccessory(
+		accessory: PlatformAccessory,
+		showName: string,
+	): boolean {
+		if (this.showAccessoryRegistrationDisabled) {
+			return false;
+		}
+
+		try {
+			this.api.registerPlatformAccessories(
+				'homebridge-cync-app',
+				'CyncAppPlatform',
+				[accessory],
+			);
+			this.accessories.push(accessory);
+			return true;
+		} catch (err) {
+			const message = (err as Error).message ?? String(err);
+			if (message.includes('Cannot Bridge more than 149 Accessories')) {
+				this.showAccessoryRegistrationDisabled = true;
+				this.log.error(
+					'Cync: Homebridge accessory limit reached while registering optional show %s; ' +
+					'skipping remaining new show accessories. Physical Cync accessories remain available.',
+					showName,
+				);
+				return false;
+			}
+			throw err;
+		}
+	}
+
 	private discoverDevices(cloudConfig: CyncCloudConfig): void {
 		if (!cloudConfig.meshes?.length) {
 			this.log.warn('Cync: no meshes returned from cloud; nothing to discover.');
 			return;
+		}
+
+		this.showAccessoryRegistrationDisabled = false;
+
+		// Physical devices are mandatory. Configure all of them before optional
+		// show accessories can consume the remaining Homebridge bridge capacity.
+		for (const mesh of cloudConfig.meshes) {
+			for (const device of mesh.devices ?? []) {
+				this.configurePrimaryAccessory(mesh, device);
+			}
 		}
 
 		for (const mesh of cloudConfig.meshes) {
@@ -689,36 +870,16 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			}
 
 			for (const device of devices) {
-				const record = device as unknown as Record<string, unknown>;
-
-				const deviceId =
-					typeof record.device_id === 'string'
-						? record.device_id
-						: typeof record.device_id === 'number'
-							? String(record.device_id)
-							: typeof record.id === 'string'
-								? record.id
-								: typeof record.id === 'number'
-									? String(record.id)
-									: typeof record.mac === 'string'
-										? record.mac
-										: typeof record.sn === 'string'
-											? record.sn
-											: `${mesh.id}-${String(record.product_id ?? 'unknown')}`;
-
-				const preferredName =
-					(typeof record.name === 'string' ? record.name : undefined) ??
-					(typeof record.displayName === 'string' ? record.displayName : undefined) ??
-					undefined;
-
-				const deviceName = preferredName || `Cync Device ${deviceId}`;
-				const uuidSeed = `cync-${mesh.id}-${deviceId}`;
-				const uuid = this.api.hap.uuid.generate(uuidSeed);
-
-				const deviceType = resolveDeviceType(device);
-				const classification = classifyCyncDevice(device, deviceType);
+				const {
+					record,
+					deviceId,
+					deviceName,
+					deviceType,
+					classification,
+				} = this.resolvePlatformDevice(mesh, device);
 				const supportsLightShows = supportsCyncLightShows(deviceType);
 				const supportsMusicShows = supportsCyncMusicShows(deviceType);
+				const supportsSegmentedControl = supportsCyncSegmentedControl(deviceType);
 
 				this.log.debug(
 					'Cync device classification: ' +
@@ -953,13 +1114,9 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 								lightShowUuid,
 							);
 
-							this.api.registerPlatformAccessories(
-								'homebridge-cync-app',
-								'CyncAppPlatform',
-								[lightShowAccessory],
-							);
-
-							this.accessories.push(lightShowAccessory);
+							if (!this.registerOptionalShowAccessory(lightShowAccessory, lightShowName)) {
+								break;
+							}
 						}
 
 						lightShowAccessory.context.device = device;
@@ -1027,13 +1184,9 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 								musicShowUuid,
 							);
 
-							this.api.registerPlatformAccessories(
-								'homebridge-cync-app',
-								'CyncAppPlatform',
-								[musicShowAccessory],
-							);
-
-							this.accessories.push(musicShowAccessory);
+							if (!this.registerOptionalShowAccessory(musicShowAccessory, musicShowName)) {
+								break;
+							}
 						}
 
 						musicShowAccessory.context.device = device;
@@ -1080,13 +1233,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 								customLightShowUuid,
 							);
 
-							this.api.registerPlatformAccessories(
-								'homebridge-cync-app',
-								'CyncAppPlatform',
-								[customLightShowAccessory],
-							);
-
-							this.accessories.push(customLightShowAccessory);
+							if (!this.registerOptionalShowAccessory(
+								customLightShowAccessory,
+								customLightShowName,
+							)) {
+								break;
+							}
 						}
 
 						customLightShowAccessory.context.device = device;
@@ -1109,7 +1261,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 						);
 					}
 
-					for (const customMultiColorScheme of supportsMusicShows ? customMultiColorSchemes : []) {
+					for (
+						const customMultiColorScheme of
+						(supportsSegmentedControl || customMultiColorSchemes.length > 0)
+							? customMultiColorSchemes
+							: []
+					) {
 						const schemeIndex = customMultiColorScheme.index;
 						const schemeName = customMultiColorScheme.name;
 
@@ -1127,13 +1284,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 								customMultiColorSchemeUuid,
 							);
 
-							this.api.registerPlatformAccessories(
-								'homebridge-cync-app',
-								'CyncAppPlatform',
-								[customMultiColorSchemeAccessory],
-							);
-
-							this.accessories.push(customMultiColorSchemeAccessory);
+							if (!this.registerOptionalShowAccessory(
+								customMultiColorSchemeAccessory,
+								customMultiColorSchemeName,
+							)) {
+								break;
+							}
 						}
 
 						customMultiColorSchemeAccessory.context.device = device;
@@ -1173,13 +1329,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 								customMusicShowUuid,
 							);
 
-							this.api.registerPlatformAccessories(
-								'homebridge-cync-app',
-								'CyncAppPlatform',
-								[customMusicShowAccessory],
-							);
-
-							this.accessories.push(customMusicShowAccessory);
+							if (!this.registerOptionalShowAccessory(
+								customMusicShowAccessory,
+								customMusicShowName,
+							)) {
+								break;
+							}
 						}
 
 						customMusicShowAccessory.context.device = device;
@@ -1248,7 +1403,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 				const enabledCustomMultiColorIndexesForCleanup =
 					this.shouldExposeCustomShows() &&
-					supportsMusicShows
+					(supportsSegmentedControl || customMultiColorSchemes.length > 0)
 						? new Set(customMultiColorSchemes.map((scheme) => scheme.index))
 						: new Set<number>();
 
@@ -1276,109 +1431,6 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 					'custom music show',
 				);
 
-				const deviceTypeStr =
-					typeof deviceType === 'number' ? String(deviceType) : 'unknown';
-
-				if (classification.accessoryType === 'ignored') {
-					this.log.info(
-						'Cync: ignoring controller device %s (deviceType=%s, deviceId=%s)',
-						deviceName,
-						deviceTypeStr,
-						deviceId,
-					);
-					continue;
-				}
-
-				let accessory = this.accessories.find(acc => acc.UUID === uuid);
-
-				if (accessory) {
-					this.log.info('Cync: using cached accessory for %s (%s)', deviceName, uuidSeed);
-				} else {
-					this.log.info('Cync: registering new accessory for %s (%s)', deviceName, uuidSeed);
-
-					accessory = new this.api.platformAccessory(deviceName, uuid);
-
-					this.api.registerPlatformAccessories(
-						'homebridge-cync-app',
-						'CyncAppPlatform',
-						[accessory],
-					);
-
-					this.accessories.push(accessory);
-				}
-
-				// Optional safety net (accessory modules also register this)
-				this.deviceIdToAccessory.set(deviceId, accessory);
-
-				if (classification.accessoryType === 'fan') {
-					this.log.info(
-						'Cync: configuring %s as Fan (deviceType=%s, deviceId=%s)',
-						deviceName,
-						deviceTypeStr,
-						deviceId,
-					);
-					configureCyncFanAccessory(
-						this.accessoryEnv,
-						mesh,
-						device,
-						accessory,
-						deviceName,
-						deviceId,
-					);
-				} else if (classification.accessoryType === 'light') {
-					this.log.info(
-						'Cync: configuring %s as Lightbulb (deviceType=%s, deviceId=%s)',
-						deviceName,
-						deviceTypeStr,
-						deviceId,
-					);
-					configureCyncLightAccessory(
-						this.accessoryEnv,
-						mesh,
-						device,
-						accessory,
-						deviceName,
-						deviceId,
-					);
-				} else if (classification.accessoryType === 'outlet') {
-					this.log.info(
-						'Cync: configuring %s as Outlet (deviceType=%s, deviceId=%s)',
-						deviceName,
-						deviceTypeStr,
-						deviceId,
-					);
-					configureCyncOutletAccessory(
-						this.accessoryEnv,
-						mesh,
-						device,
-						accessory,
-						deviceName,
-						deviceId,
-					);
-				} else if (classification.accessoryType === 'unsupported') {
-					this.log.warn(
-						'Cync: unsupported device %s (deviceType=%s, deviceId=%s); skipping',
-						deviceName,
-						deviceTypeStr,
-						deviceId,
-					);
-					continue;
-				} else {
-					this.log.info(
-						'Cync: configuring %s as Switch (deviceType=%s, deviceId=%s)',
-						deviceName,
-						deviceTypeStr,
-						deviceId,
-					);
-					configureCyncSwitchAccessory(
-						this.accessoryEnv,
-						mesh,
-						device,
-						accessory,
-						deviceName,
-						deviceId,
-					);
-				}
 			}
 		}
 	}

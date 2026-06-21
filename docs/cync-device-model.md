@@ -104,6 +104,23 @@ CyncCapabilities {
 
 These flags originate from a fixed mapping inside the upstream integration and are chosen based on the device’s reported type.
 
+The plugin carries a normalized mapping derived from the `DeviceType` table in
+a decompiled Cync Android APK. It uses the embedded product family to select
+the HomeKit service and the following capabilities to expose supported controls:
+
+- `Dimming` → Brightness
+- `CctColor` → Color Temperature
+- `RgbColor` → Hue and Saturation
+- `FanSpeed` → Fan service and Rotation Speed
+- `LightShow`, `MusicShow`, and `SegmentedControl` → corresponding show accessories
+
+Known plugs are exposed as Outlets. Dimmable wall switches are intentionally
+exposed as Lightbulbs because HomeKit Switch services do not support brightness.
+Unknown future device types continue through cloud and LAN capability fallback
+instead of being assigned a potentially incorrect APK-derived profile.
+Per-device saved Segment metadata is also accepted as stronger runtime evidence
+when it is present on a device not marked `SegmentedControl` by the APK table.
+
 ---
 
 ## **6. Controller Relationships**

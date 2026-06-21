@@ -15,6 +15,7 @@
 - Stopped optional show discovery cleanly when Homebridge reaches its 149-accessory bridge limit instead of aborting discovery and reporting a misleading cloud-login failure.
 
 ### Changed
+- Replaced legacy device-type heuristics with APK-derived capability metadata sourced from the decompiled Cync Android application.
 - Corrected capability-table attribution from SDK-derived to decompiled APK-derived.
 
 ## v0.5.3

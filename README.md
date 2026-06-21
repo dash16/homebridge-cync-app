@@ -91,6 +91,11 @@ Devices should appear automatically after startup.
 
 Tokens are cached locally to reduce repeated login prompts.
 
+### Shows by Device
+
+After signing in, the plugin configuration dynamically lists every show-compatible Cync device. Expand a device to choose the built-in Light Shows, Music Shows, saved Custom Shows, and saved Segment scenes that should appear as HomeKit switches for that device.
+
+Show selections are stored by Cync device ID, so renaming a device does not reset its configuration. Existing global show settings are migrated to per-device selections the next time the plugin configuration UI is opened and saved.
 
 ---
 

@@ -51,50 +51,15 @@
 
 <div class="card mb-3">
 	<div class="card-body">
-		<h5 class="card-title">Cync Shows</h5>
-
-		<div class="form-check mt-3">
-			<input type="checkbox" id="cyncExposeCustomShows" class="form-check-input">
-			<label for="cyncExposeCustomShows" class="form-check-label">
-				Expose saved Custom Shows as HomeKit switches
-			</label>
+		<div class="d-flex justify-content-between align-items-center gap-2">
+			<h5 class="card-title mb-0">Shows by Device</h5>
+			<button id="cyncRefreshDevicesBtn" class="btn btn-sm btn-outline-secondary">Refresh Devices</button>
 		</div>
-
-		<p class="text-muted mt-2">
-			Saved Custom Shows created in the Cync app can be exposed as separate HomeKit switches.
+		<p class="text-muted mt-2 mb-3">
+			Choose exactly which show switches each compatible Cync device exposes to HomeKit.
 		</p>
-		<div class="form-check">
-			<input type="checkbox" id="cyncExposeLightShows" class="form-check-input">
-			<label for="cyncExposeLightShows" class="form-check-label">
-				Expose built-in Light Shows as HomeKit switches
-			</label>
-		</div>
-
-		<p class="text-muted mt-2">
-			Supported RGBIC devices can expose selected built-in Cync Light Shows as separate HomeKit switches.
-		</p>
-
-		<details class="mt-3">
-			<summary>Choose Light Shows to expose</summary>
-
-			<div id="cyncLightShowChoices" class="mt-3"></div>
-		</details>
-		<div class="form-check mt-3">
-			<input type="checkbox" id="cyncExposeMusicShows" class="form-check-input">
-			<label for="cyncExposeMusicShows" class="form-check-label">
-				Expose built-in Music Shows as HomeKit switches
-			</label>
-		</div>
-
-		<p class="text-muted mt-2">
-			Supported RGBIC devices can expose selected built-in Cync Music Shows as separate HomeKit switches.
-		</p>
-
-		<details class="mt-3">
-			<summary>Choose Music Shows to expose</summary>
-
-			<div id="cyncMusicShowChoices" class="mt-3"></div>
-		</details>
+		<div id="cyncDeviceShowsStatus" class="text-muted">Loading compatible devices…</div>
+		<div id="cyncDeviceShows"></div>
 	</div>
 </div>
 
@@ -107,8 +72,9 @@ homebridge.addEventListener('ready', async () => {
 	const signOutBtn = document.getElementById('cyncSignOutBtn');
 	const statusEl = document.getElementById('cyncStatus');
 
-	const exposeLightShowsInput = document.getElementById('cyncExposeLightShows');
-	const lightShowChoicesEl = document.getElementById('cyncLightShowChoices');
+	const deviceShowsEl = document.getElementById('cyncDeviceShows');
+	const deviceShowsStatusEl = document.getElementById('cyncDeviceShowsStatus');
+	const refreshDevicesBtn = document.getElementById('cyncRefreshDevicesBtn');
 	const BUILT_IN_CYNC_LIGHT_SHOWS = [
 		{ index: 1, name: 'Candle' },
 		{ index: 2, name: 'Rainbow' },
@@ -123,8 +89,6 @@ homebridge.addEventListener('ready', async () => {
 		{ index: 67, name: 'Cyber' },
 	];
 
-	const exposeMusicShowsInput = document.getElementById('cyncExposeMusicShows');
-	const musicShowChoicesEl = document.getElementById('cyncMusicShowChoices');
 	const BUILT_IN_CYNC_MUSIC_SHOWS = [
 		{ index: 1, name: 'Midnight' },
 		{ index: 2, name: 'Earth Tones' },
@@ -139,35 +103,81 @@ homebridge.addEventListener('ready', async () => {
 	let pluginConfig = await homebridge.getPluginConfig();
 	let cfg = pluginConfig[0] || {};
 
-	const exposeCustomShowsInput = document.getElementById('cyncExposeCustomShows');
-	exposeCustomShowsInput.checked = cfg.exposeCustomShows === true;
+	function legacyDeviceConfig(device) {
+		return {
+			deviceId: device.deviceId,
+			lightShowIndexes: cfg.exposeLightShows === true
+				? (Array.isArray(cfg.enabledLightShowIndexes)
+					? cfg.enabledLightShowIndexes.map(Number) : BUILT_IN_CYNC_LIGHT_SHOWS.map(show => show.index))
+				: [],
+			musicShowIndexes: cfg.exposeMusicShows === true
+				? (Array.isArray(cfg.enabledMusicShowIndexes)
+					? cfg.enabledMusicShowIndexes.map(Number) : BUILT_IN_CYNC_MUSIC_SHOWS.map(show => show.index))
+				: [],
+			customLightShowIndexes: cfg.exposeCustomShows === true
+				? device.customLightShows.map(show => show.index) : [],
+			customMusicShowIndexes: cfg.exposeCustomShows === true
+				? device.customMusicShows.map(show => show.index) : [],
+			multiColorSchemeIndexes: cfg.exposeCustomShows === true
+				? device.multiColorSchemes.map(show => show.index) : [],
+		};
+	}
 
-	exposeCustomShowsInput.addEventListener('change', async () => {
-		await updateConfig({
-			exposeCustomShows: exposeCustomShowsInput.checked,
-		});
-		statusEl.textContent = 'Setting updated. Click Save.';
-	});
+	function getDeviceConfig(device) {
+		const existing = Array.isArray(cfg.deviceShowConfigs)
+			? cfg.deviceShowConfigs.find(entry => String(entry.deviceId) === device.deviceId)
+			: null;
+		return existing || legacyDeviceConfig(device);
+	}
 
-	exposeLightShowsInput.checked = cfg.exposeLightShows === true;
+	async function saveDeviceSelection(deviceId, key, indexes) {
+		const configs = Array.isArray(cfg.deviceShowConfigs) ? [...cfg.deviceShowConfigs] : [];
+		const index = configs.findIndex(entry => String(entry.deviceId) === deviceId);
+		const current = index >= 0 ? configs[index] : {
+			deviceId,
+			lightShowIndexes: [],
+			musicShowIndexes: [],
+			customLightShowIndexes: [],
+			customMusicShowIndexes: [],
+			multiColorSchemeIndexes: [],
+		};
+		const next = { ...current, deviceId, [key]: indexes };
+		if (index >= 0) {
+			configs[index] = next;
+		} else {
+			configs.push(next);
+		}
 
-	const enabledLightShowIndexes = Array.isArray(cfg.enabledLightShowIndexes)
-		? cfg.enabledLightShowIndexes.map(Number)
-		: [2];
+		cfg = { ...cfg, deviceShowConfigs: configs };
+		delete cfg.exposeCustomShows;
+		delete cfg.exposeLightShows;
+		delete cfg.enabledLightShowIndexes;
+		delete cfg.exposeMusicShows;
+		delete cfg.enabledMusicShowIndexes;
+		pluginConfig = [cfg];
+		await homebridge.updatePluginConfig(pluginConfig);
+		statusEl.textContent = 'Device show selection updated. Click Save.';
+	}
 
-	function renderLightShowChoices() {
-		lightShowChoicesEl.innerHTML = '';
+	function addShowGroup(container, device, title, key, shows, selectedIndexes) {
+		if (!shows.length) {
+			return;
+		}
 
-		for (const show of BUILT_IN_CYNC_LIGHT_SHOWS) {
+		const heading = document.createElement('div');
+		heading.className = 'fw-semibold mt-3 mb-1';
+		heading.textContent = title;
+		container.appendChild(heading);
+
+		for (const show of shows) {
 			const wrapper = document.createElement('div');
 			wrapper.className = 'form-check';
-
 			const input = document.createElement('input');
 			input.type = 'checkbox';
 			input.className = 'form-check-input';
-			input.id = `cyncLightShow${show.index}`;
+			input.id = `cync-${device.deviceId}-${key}-${show.index}`;
 			input.value = String(show.index);
-			input.checked = enabledLightShowIndexes.includes(show.index);
+			input.checked = selectedIndexes.includes(show.index);
 
 			const label = document.createElement('label');
 			label.className = 'form-check-label';
@@ -175,83 +185,89 @@ homebridge.addEventListener('ready', async () => {
 			label.textContent = show.name;
 
 			input.addEventListener('change', async () => {
-				const selected = Array.from(
-					lightShowChoicesEl.querySelectorAll('input[type="checkbox"]:checked'),
-				).map((checkedInput) => Number(checkedInput.value));
-
-				await updateConfig({
-					enabledLightShowIndexes: selected,
-				});
-
-				statusEl.textContent = 'Light Show selection updated. Click Save.';
+				const selected = Array.from(container.querySelectorAll(`input[data-config-key="${key}"]:checked`))
+					.map(checked => Number(checked.value));
+				await saveDeviceSelection(device.deviceId, key, selected);
 			});
-
-			wrapper.appendChild(input);
-			wrapper.appendChild(label);
-			lightShowChoicesEl.appendChild(wrapper);
+			input.dataset.configKey = key;
+			wrapper.append(input, label);
+			container.appendChild(wrapper);
 		}
 	}
 
-	renderLightShowChoices();
+	function renderDevices(devices) {
+		deviceShowsEl.innerHTML = '';
+		deviceShowsStatusEl.textContent = devices.length
+			? `${devices.length} compatible device${devices.length === 1 ? '' : 's'} found.`
+			: 'No show-compatible Cync devices were found.';
 
-	exposeLightShowsInput.addEventListener('change', async () => {
-		await updateConfig({
-			exposeLightShows: exposeLightShowsInput.checked,
-		});
-		statusEl.textContent = 'Setting updated. Click Save.';
-	});
+		for (const device of devices) {
+			const config = getDeviceConfig(device);
+			const details = document.createElement('details');
+			details.className = 'border rounded p-3 mt-3';
+			const summary = document.createElement('summary');
+			summary.className = 'fw-semibold';
+			summary.textContent = device.name;
+			details.appendChild(summary);
 
-	exposeMusicShowsInput.checked = cfg.exposeMusicShows === true;
-
-	const enabledMusicShowIndexes = Array.isArray(cfg.enabledMusicShowIndexes)
-		? cfg.enabledMusicShowIndexes.map(Number)
-		: [1];
-
-	function renderMusicShowChoices() {
-		musicShowChoicesEl.innerHTML = '';
-
-		for (const show of BUILT_IN_CYNC_MUSIC_SHOWS) {
-			const wrapper = document.createElement('div');
-			wrapper.className = 'form-check';
-
-			const input = document.createElement('input');
-			input.type = 'checkbox';
-			input.className = 'form-check-input';
-			input.id = `cyncMusicShow${show.index}`;
-			input.value = String(show.index);
-			input.checked = enabledMusicShowIndexes.includes(show.index);
-
-			const label = document.createElement('label');
-			label.className = 'form-check-label';
-			label.htmlFor = input.id;
-			label.textContent = show.name;
-
-			input.addEventListener('change', async () => {
-				const selected = Array.from(
-					musicShowChoicesEl.querySelectorAll('input[type="checkbox"]:checked'),
-				).map((checkedInput) => Number(checkedInput.value));
-
-				await updateConfig({
-					enabledMusicShowIndexes: selected,
-				});
-
-				statusEl.textContent = 'Music Show selection updated. Click Save.';
-			});
-
-			wrapper.appendChild(input);
-			wrapper.appendChild(label);
-			musicShowChoicesEl.appendChild(wrapper);
+			addShowGroup(details, device, 'Light Shows', 'lightShowIndexes',
+				BUILT_IN_CYNC_LIGHT_SHOWS, config.lightShowIndexes || []);
+			if (device.supportsMusicShows) {
+				addShowGroup(details, device, 'Music Shows', 'musicShowIndexes',
+					BUILT_IN_CYNC_MUSIC_SHOWS, config.musicShowIndexes || []);
+			}
+			addShowGroup(details, device, 'Saved Light Shows', 'customLightShowIndexes',
+				device.customLightShows, config.customLightShowIndexes || []);
+			addShowGroup(details, device, 'Saved Music Shows', 'customMusicShowIndexes',
+				device.customMusicShows, config.customMusicShowIndexes || []);
+			addShowGroup(details, device, 'Saved Segment Scenes', 'multiColorSchemeIndexes',
+				device.multiColorSchemes, config.multiColorSchemeIndexes || []);
+			deviceShowsEl.appendChild(details);
 		}
 	}
 
-	renderMusicShowChoices();
+	async function loadDevices() {
+		refreshDevicesBtn.disabled = true;
+		deviceShowsStatusEl.textContent = 'Loading compatible devices…';
+		try {
+			const response = await homebridge.request('/devices');
+			if (!response?.ok) {
+				throw new Error(response?.error || 'Unable to load Cync devices.');
+			}
+			const hasLegacyShowConfig = [
+				'exposeCustomShows',
+				'exposeLightShows',
+				'enabledLightShowIndexes',
+				'exposeMusicShows',
+				'enabledMusicShowIndexes',
+			].some(key => Object.prototype.hasOwnProperty.call(cfg, key));
+			if (
+				!Array.isArray(cfg.deviceShowConfigs) ||
+				(cfg.deviceShowConfigs.length === 0 && hasLegacyShowConfig)
+			) {
+				cfg = {
+					...cfg,
+					deviceShowConfigs: (response.devices || []).map(legacyDeviceConfig),
+				};
+				delete cfg.exposeCustomShows;
+				delete cfg.exposeLightShows;
+				delete cfg.enabledLightShowIndexes;
+				delete cfg.exposeMusicShows;
+				delete cfg.enabledMusicShowIndexes;
+				pluginConfig = [cfg];
+				await homebridge.updatePluginConfig(pluginConfig);
+				statusEl.textContent = 'Show settings migrated by device. Click Save.';
+			}
+			renderDevices(response.devices || []);
+		} catch (error) {
+			deviceShowsStatusEl.textContent = error?.message || 'Unable to load Cync devices.';
+			deviceShowsEl.innerHTML = '';
+		} finally {
+			refreshDevicesBtn.disabled = false;
+		}
+	}
 
-	exposeMusicShowsInput.addEventListener('change', async () => {
-		await updateConfig({
-			exposeMusicShows: exposeMusicShowsInput.checked,
-		});
-		statusEl.textContent = 'Setting updated. Click Save.';
-	});
+	refreshDevicesBtn.addEventListener('click', loadDevices);
 
 	// Helper to update in-memory pluginConfig (persisted when user clicks Save in HB)
 	async function updateConfig(partial) {
@@ -283,6 +299,8 @@ homebridge.addEventListener('ready', async () => {
 	} catch (e) {
 		console.error('[cync-ui] /status request failed:', e);
 	}
+
+	await loadDevices();
 
 	// Request OTP email via server.js
 	requestOtpBtn.addEventListener('click', async () => {
@@ -355,6 +373,7 @@ homebridge.addEventListener('ready', async () => {
 				username: '',
 				password: '',
 				twoFactor: '',
+				deviceShowConfigs: [],
 			});
 
 			setLockedState(false);

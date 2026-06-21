@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Added dynamic discovery of show-compatible devices in the Homebridge configuration UI.
+- Added per-device selection of built-in Light Shows, Music Shows, saved Custom Shows, and saved Segment scenes.
+
+### Changed
+- Replaced global show controls with stable device-ID-based configuration while retaining runtime compatibility with existing global settings.
+
 ## v0.6.0
 
 **Release Date:** 2026-06-21

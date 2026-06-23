@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.6.1
+
+**Release Date:** 2026-06-23
 
 ### Added
 - Added dynamic discovery of show-compatible devices in the Homebridge configuration UI.

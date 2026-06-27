@@ -49,6 +49,8 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 	error: log.error.bind(log),
 });
 
+const PERIODIC_MESH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 type CyncShowKind =
 	| 'built-in-light'
 	| 'built-in-music'
@@ -108,6 +110,18 @@ function promoteCapabilitiesFromLan(
 		changed = true;
 	}
 
+	if (
+		current.isLight &&
+		typeof update.colorTemperatureMired === 'number' &&
+		Number.isFinite(update.colorTemperatureMired)
+	) {
+		if (!current.supportsCt) {
+			current.supportsCt = true;
+			current.source = 'lan';
+			changed = true;
+		}
+	}
+
 	return changed;
 }
 
@@ -127,11 +141,11 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private cloudConfig: CyncCloudConfig | null = null;
 	private readonly deviceIdToAccessory = new Map<string, PlatformAccessory>();
 	private readonly deviceLastSeen = new Map<string, number>();
-	private readonly devicePollTimers = new Map<string, NodeJS.Timeout>();
+	private readonly polledDeviceIds = new Set<string>();
+	private meshPollTimer: NodeJS.Timeout | null = null;
 	private showAccessoryRegistrationDisabled = false;
 
 	private readonly offlineTimeoutMs = 30 * 60 * 1000;
-	private readonly pollIntervalMs = 60_000; // 60 seconds
 
 	private setMainAccessoryOnForDevice(deviceId: string, on: boolean): void {
 		const accessory = this.deviceIdToAccessory.get(deviceId);
@@ -437,19 +451,24 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	}
 
 	private startPollingDevice(deviceId: string): void {
-		const existing = this.devicePollTimers.get(deviceId);
-		if (existing) {
-			clearInterval(existing);
+		this.polledDeviceIds.add(deviceId);
+
+		if (this.meshPollTimer) {
+			return;
 		}
 
-		const timer = setInterval(() => {
-			// Optional future hook:
-			// - Call a "getDeviceState" or similar on tcpClient/client
-			// - On success, call this.markDeviceSeen(deviceId)
-			// - On failure, optionally log or mark offline
-		}, this.pollIntervalMs);
+		this.log.debug(
+			'Cync: starting periodic mesh refresh every %dms',
+			PERIODIC_MESH_REFRESH_INTERVAL_MS,
+		);
 
-		this.devicePollTimers.set(deviceId, timer);
+		this.meshPollTimer = setInterval(() => {
+			if (this.polledDeviceIds.size === 0) {
+				return;
+			}
+
+			this.tcpClient.requestMeshStateRefresh('periodic platform refresh');
+		}, PERIODIC_MESH_REFRESH_INTERVAL_MS);
 	}
 
 	private handleLanUpdate(update: LanDeviceUpdate): void {
@@ -502,13 +521,19 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 		// ----- On/off -----
 		if (typeof update.on === 'boolean') {
+			const previousOn = ctx.cync.on;
 			ctx.cync.on = update.on;
 
-			this.log.info(
-				'Cync: LAN update -> %s is now %s (deviceId=%s)',
+			const logLanPowerUpdate = previousOn === update.on
+				? this.log.debug.bind(this.log)
+				: this.log.info.bind(this.log);
+
+			logLanPowerUpdate(
+				'Cync: LAN update -> %s is now %s (deviceId=%s)%s',
 				accessory.displayName,
 				update.on ? 'ON' : 'OFF',
 				update.deviceId,
+				previousOn === update.on ? ' (already cached)' : '',
 			);
 
 			if (lightService || outletService || switchService) {
@@ -600,6 +625,8 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			// Cache (optional, but helps keep internal state consistent)
 			ctx.cync.hue = hsv.h;
 			ctx.cync.saturation = hsv.s;
+			ctx.cync.rgb = update.rgb;
+			ctx.cync.colorActive = true;
 
 			if (lightService.testCharacteristic(Characteristic.Hue)) {
 				lightService.updateCharacteristic(Characteristic.Hue, hsv.h);
@@ -616,6 +643,37 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				update.rgb.b,
 				Math.round(hsv.h),
 				Math.round(hsv.s),
+				update.deviceId,
+			);
+		}
+		// ----- Color Temperature -----
+		if (
+			lightService &&
+			typeof update.colorTemperatureMired === 'number' &&
+			Number.isFinite(update.colorTemperatureMired)
+		) {
+			const mired = Math.max(153, Math.min(500, Math.round(update.colorTemperatureMired)));
+
+			ctx.cync.colorTemperature = mired;
+			ctx.cync.colorActive = false;
+			ctx.cync.hue = 0;
+			ctx.cync.saturation = 0;
+			ctx.cync.rgb = { r: 255, g: 255, b: 255 };
+
+			if (lightService.testCharacteristic(Characteristic.ColorTemperature)) {
+				lightService.updateCharacteristic(Characteristic.ColorTemperature, mired);
+			}
+			if (lightService.testCharacteristic(Characteristic.Hue)) {
+				lightService.updateCharacteristic(Characteristic.Hue, 0);
+			}
+			if (lightService.testCharacteristic(Characteristic.Saturation)) {
+				lightService.updateCharacteristic(Characteristic.Saturation, 0);
+			}
+
+			this.log.debug(
+				'Cync: LAN update -> %s colorTemperature=%d mired (deviceId=%s)',
+				accessory.displayName,
+				mired,
 				update.deviceId,
 			);
 		}
@@ -675,6 +733,13 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		this.api.on('didFinishLaunching', () => {
 			this.log.info(PLATFORM_NAME, 'didFinishLaunching');
 			void this.loadCync();
+		});
+		this.api.on('shutdown', () => {
+			if (this.meshPollTimer) {
+				clearInterval(this.meshPollTimer);
+				this.meshPollTimer = null;
+			}
+			this.polledDeviceIds.clear();
 		});
 		this.accessoryEnv = {
 		  log: this.log,

@@ -576,6 +576,9 @@ export function configureCyncLightAccessory(
 			// Treat CT as "white mode" (not RGB color mode)
 			cyncMeta.colorTemperature = mired;
 			cyncMeta.colorActive = false;
+			cyncMeta.hue = 0;
+			cyncMeta.saturation = 0;
+			cyncMeta.rgb = { r: 255, g: 255, b: 255 };
 
 			const brightness =
 				typeof cyncMeta.brightness === 'number' ? cyncMeta.brightness : 100;

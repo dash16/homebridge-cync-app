@@ -105,6 +105,14 @@ Show selections are stored by Cync device ID, so renaming a device does not rese
 
 Some Cync devices expose both RGB color and color temperature controls. HomeKit may present these differently depending on the accessory category and Home app behavior.
 
+Cync white presets are exposed to HomeKit as color temperature values, not as RGB colors. The Cync app presents presets such as **Cool White**, **Daylight**, **Sunlight**, **Natural White**, **Early Morning**, **Sunrise**, and **Warm White** as a discrete ladder. HomeKit represents the same idea as a continuous color-temperature slider using mired values, where lower mired values are cooler and higher mired values are warmer.
+
+Because of that, the Home app may not visually match the Cync preset list one-for-one. For example, **Natural White** may appear near the center of HomeKit's temperature gradient, while **Cool White** and **Warm White** should appear near the cool and warm ends respectively. This is expected: HomeKit is showing the calibrated temperature position, while the Cync app is showing named presets.
+
+The Home app's **Swatch** tab can look visually similar to Cync's white presets, but swatches are RGB color selections. Choosing a swatch may put the device into RGB color mode instead of tunable-white color-temperature mode. For best white-temperature behavior, use the Temperature control in HomeKit or the white preset list in the Cync app.
+
+If a Cync white preset maps to an unexpected HomeKit position, enable debug logging and include the relevant `compact state 0x43` or `mesh state record` lines when opening an issue. These lines include the Cync tone byte and the HomeKit mired value used by the plugin.
+
 ### Outlets and Switches
 
 Certain Cync device types are exposed as outlets instead of generic switches to improve HomeKit behavior and Siri integration.

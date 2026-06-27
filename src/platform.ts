@@ -110,6 +110,18 @@ function promoteCapabilitiesFromLan(
 		changed = true;
 	}
 
+	if (
+		current.isLight &&
+		typeof update.colorTemperatureMired === 'number' &&
+		Number.isFinite(update.colorTemperatureMired)
+	) {
+		if (!current.supportsCt) {
+			current.supportsCt = true;
+			current.source = 'lan';
+			changed = true;
+		}
+	}
+
 	return changed;
 }
 
@@ -613,6 +625,8 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			// Cache (optional, but helps keep internal state consistent)
 			ctx.cync.hue = hsv.h;
 			ctx.cync.saturation = hsv.s;
+			ctx.cync.rgb = update.rgb;
+			ctx.cync.colorActive = true;
 
 			if (lightService.testCharacteristic(Characteristic.Hue)) {
 				lightService.updateCharacteristic(Characteristic.Hue, hsv.h);
@@ -629,6 +643,37 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				update.rgb.b,
 				Math.round(hsv.h),
 				Math.round(hsv.s),
+				update.deviceId,
+			);
+		}
+		// ----- Color Temperature -----
+		if (
+			lightService &&
+			typeof update.colorTemperatureMired === 'number' &&
+			Number.isFinite(update.colorTemperatureMired)
+		) {
+			const mired = Math.max(153, Math.min(500, Math.round(update.colorTemperatureMired)));
+
+			ctx.cync.colorTemperature = mired;
+			ctx.cync.colorActive = false;
+			ctx.cync.hue = 0;
+			ctx.cync.saturation = 0;
+			ctx.cync.rgb = { r: 255, g: 255, b: 255 };
+
+			if (lightService.testCharacteristic(Characteristic.ColorTemperature)) {
+				lightService.updateCharacteristic(Characteristic.ColorTemperature, mired);
+			}
+			if (lightService.testCharacteristic(Characteristic.Hue)) {
+				lightService.updateCharacteristic(Characteristic.Hue, 0);
+			}
+			if (lightService.testCharacteristic(Characteristic.Saturation)) {
+				lightService.updateCharacteristic(Characteristic.Saturation, 0);
+			}
+
+			this.log.debug(
+				'Cync: LAN update -> %s colorTemperature=%d mired (deviceId=%s)',
+				accessory.displayName,
+				mired,
 				update.deviceId,
 			);
 		}

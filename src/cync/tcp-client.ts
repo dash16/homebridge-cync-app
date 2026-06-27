@@ -18,6 +18,10 @@ type TransportMode = 'tls_strict' | 'tls_relaxed' | 'tcp';
 
 const POST_COMMAND_MESH_REFRESH_DELAY_MS = 750;
 const POWER_STATE_CONFIRM_TIMEOUT_MS = 10_000;
+const CTC_MIN_MIRED = 153;
+const CTC_MAX_MIRED = 500;
+const CYNC_CT_WARM_TONE = 24;
+const CYNC_CT_COOL_TONE = 100;
 
 function clampNumber(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
@@ -34,11 +38,28 @@ function hkBrightnessToPct100Byte(hkBrightness: number): number {
 	return clampNumber(hk, 1, 100);
 }
 
-function scaleToByte(value: number, inMin: number, inMax: number, invert: boolean): number {
-	const v = clampNumber(value, inMin, inMax);
-	const t = (v - inMin) / (inMax - inMin); // 0..1
-	const u = invert ? (1 - t) : t;
-	return clampNumber(Math.round(u * 255), 0, 255);
+function colorToneByteToMired(colorTone: number): number {
+	const tone = clampNumber(Math.round(colorTone), 0, 255);
+	const t = clampNumber(
+		(tone - CYNC_CT_WARM_TONE) / (CYNC_CT_COOL_TONE - CYNC_CT_WARM_TONE),
+		0,
+		1,
+	);
+	return clampNumber(
+		Math.round(CTC_MAX_MIRED - (t * (CTC_MAX_MIRED - CTC_MIN_MIRED))),
+		CTC_MIN_MIRED,
+		CTC_MAX_MIRED,
+	);
+}
+
+function miredToColorToneByte(mired: number, ctMinMired: number, ctMaxMired: number): number {
+	const clampedMired = clampNumber(Math.round(mired), ctMinMired, ctMaxMired);
+	const coolness = (ctMaxMired - clampedMired) / (ctMaxMired - ctMinMired);
+	return clampNumber(
+		Math.round(CYNC_CT_WARM_TONE + (coolness * (CYNC_CT_COOL_TONE - CYNC_CT_WARM_TONE))),
+		CYNC_CT_WARM_TONE,
+		CYNC_CT_COOL_TONE,
+	);
 }
 // TCP Hex Formatter: Makes packet dumps easier to compare byte-by-byte
 // Formats buffers as spaced hex so working and failing packets can be visually diffed.
@@ -57,6 +78,7 @@ export type LanDeviceUpdate = {
 	brightnessPct?: number;
 	lastNonZeroBrightnessPct?: number;
 	rgb?: { r: number; g: number; b: number };
+	colorTemperatureMired?: number;
 };
 
 export type LanDeviceUpdateListener = (update: LanDeviceUpdate) => void;
@@ -334,6 +356,67 @@ export class TcpClient {
 		);
 
 		return { controllerId, deviceId, on, brightnessPct, lastNonZeroBrightnessPct };
+	}
+
+	private parseCompactStateFrame43(frame: Buffer): LanDeviceUpdate | null {
+		if (frame.length < 26) {
+			return null;
+		}
+
+		const controllerId = frame.readUInt32BE(0);
+		const homeId = this.switchIdToHomeId.get(controllerId);
+		if (!homeId) {
+			return null;
+		}
+
+		const devices = this.homeDevices[homeId];
+		if (!devices || devices.length === 0) {
+			return null;
+		}
+
+		if (frame[9] !== 0x10) {
+			return null;
+		}
+
+		const deviceIndex = frame[10];
+		const deviceId = deviceIndex < devices.length ? devices[deviceIndex] : undefined;
+		if (!deviceId) {
+			return null;
+		}
+
+		const on = frame[11] > 0;
+		const levelByte = frame[12];
+		const colorTone = frame[13];
+		const brightnessPct = on ? clampNumber(levelByte, 1, 100) : 0;
+		const lastNonZeroBrightnessPct =
+			levelByte > 0 ? clampNumber(levelByte, 1, 100) : undefined;
+		const rgb = colorTone === 0xfe
+			? { r: frame[14], g: frame[15], b: frame[16] }
+			: undefined;
+		const colorTemperatureMired = colorTone !== 0xfe
+			? colorToneByteToMired(colorTone)
+			: undefined;
+
+		this.log.debug(
+			'[Cync TCP] compact state 0x43: device=%s index=%d on=%s level=%d tone=0x%s mired=%s rgb=%o prefix=%s',
+			deviceId,
+			deviceIndex,
+			String(on),
+			levelByte,
+			colorTone.toString(16).padStart(2, '0'),
+			colorTemperatureMired === undefined ? 'none' : String(colorTemperatureMired),
+			rgb,
+			formatHexPrefix(frame),
+		);
+
+		return {
+			deviceId,
+			on,
+			brightnessPct,
+			lastNonZeroBrightnessPct,
+			rgb,
+			colorTemperatureMired,
+		};
 	}
 
 
@@ -1503,14 +1586,18 @@ export class TcpClient {
 			const rgb = colorTone === 0xfe
 				? { r: rec[20], g: rec[21], b: rec[22] }
 				: undefined;
+			const colorTemperatureMired = colorTone !== 0xfe
+				? colorToneByteToMired(colorTone)
+				: undefined;
 
 			this.log.debug(
-				'[Cync TCP] mesh state record: device=%s index=%d on=%s level=%d ct=%d rgb=%o',
+				'[Cync TCP] mesh state record: device=%s index=%d on=%s level=%d ct=%d mired=%s rgb=%o',
 				deviceId,
 				deviceIndex,
 				String(on),
 				levelByte,
 				colorTone,
+				colorTemperatureMired === undefined ? 'none' : String(colorTemperatureMired),
 				rgb,
 			);
 
@@ -1520,6 +1607,7 @@ export class TcpClient {
 				brightnessPct,
 				lastNonZeroBrightnessPct,
 				rgb,
+				colorTemperatureMired,
 			});
 			this.confirmPendingPowerCommand(deviceId, on, 'mesh state');
 		}
@@ -1681,8 +1769,7 @@ export class TcpClient {
 			const on = hkBrightness > 0;
 			const level = hkBrightnessToPct100Byte(hkBrightness);
 
-			const invertTone = params.invertTone === true;
-			const tone = scaleToByte(mired, ctMinMired, ctMaxMired, invertTone);
+			const tone = miredToColorToneByte(mired, ctMinMired, ctMaxMired);
 
 			await this.sendWithControllerRetry(
 				deviceId,
@@ -2038,7 +2125,14 @@ export class TcpClient {
 		}
 
 		if (type === 0x43) {
-			this.logUnparsedFrame(type, frame, 'compact event/status frame');
+			const compactParsed = this.parseCompactStateFrame43(frame);
+			if (compactParsed) {
+				payload = compactParsed;
+				this.emitLanDeviceUpdate(compactParsed);
+				this.confirmPendingPowerCommand(compactParsed.deviceId, compactParsed.on, 'compact LAN update');
+			} else {
+				this.logUnparsedFrame(type, frame, 'compact event/status frame');
+			}
 		}
 
 		if ((type === 0x73 || type === 0x83) && frame.length >= 14) {

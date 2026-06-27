@@ -49,6 +49,8 @@ const toCyncLogger = (log: Logger): CyncLogger => ({
 	error: log.error.bind(log),
 });
 
+const PERIODIC_MESH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 type CyncShowKind =
 	| 'built-in-light'
 	| 'built-in-music'
@@ -127,11 +129,11 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private cloudConfig: CyncCloudConfig | null = null;
 	private readonly deviceIdToAccessory = new Map<string, PlatformAccessory>();
 	private readonly deviceLastSeen = new Map<string, number>();
-	private readonly devicePollTimers = new Map<string, NodeJS.Timeout>();
+	private readonly polledDeviceIds = new Set<string>();
+	private meshPollTimer: NodeJS.Timeout | null = null;
 	private showAccessoryRegistrationDisabled = false;
 
 	private readonly offlineTimeoutMs = 30 * 60 * 1000;
-	private readonly pollIntervalMs = 60_000; // 60 seconds
 
 	private setMainAccessoryOnForDevice(deviceId: string, on: boolean): void {
 		const accessory = this.deviceIdToAccessory.get(deviceId);
@@ -437,19 +439,24 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	}
 
 	private startPollingDevice(deviceId: string): void {
-		const existing = this.devicePollTimers.get(deviceId);
-		if (existing) {
-			clearInterval(existing);
+		this.polledDeviceIds.add(deviceId);
+
+		if (this.meshPollTimer) {
+			return;
 		}
 
-		const timer = setInterval(() => {
-			// Optional future hook:
-			// - Call a "getDeviceState" or similar on tcpClient/client
-			// - On success, call this.markDeviceSeen(deviceId)
-			// - On failure, optionally log or mark offline
-		}, this.pollIntervalMs);
+		this.log.debug(
+			'Cync: starting periodic mesh refresh every %dms',
+			PERIODIC_MESH_REFRESH_INTERVAL_MS,
+		);
 
-		this.devicePollTimers.set(deviceId, timer);
+		this.meshPollTimer = setInterval(() => {
+			if (this.polledDeviceIds.size === 0) {
+				return;
+			}
+
+			this.tcpClient.requestMeshStateRefresh('periodic platform refresh');
+		}, PERIODIC_MESH_REFRESH_INTERVAL_MS);
 	}
 
 	private handleLanUpdate(update: LanDeviceUpdate): void {
@@ -502,13 +509,19 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 		// ----- On/off -----
 		if (typeof update.on === 'boolean') {
+			const previousOn = ctx.cync.on;
 			ctx.cync.on = update.on;
 
-			this.log.info(
-				'Cync: LAN update -> %s is now %s (deviceId=%s)',
+			const logLanPowerUpdate = previousOn === update.on
+				? this.log.debug.bind(this.log)
+				: this.log.info.bind(this.log);
+
+			logLanPowerUpdate(
+				'Cync: LAN update -> %s is now %s (deviceId=%s)%s',
 				accessory.displayName,
 				update.on ? 'ON' : 'OFF',
 				update.deviceId,
+				previousOn === update.on ? ' (already cached)' : '',
 			);
 
 			if (lightService || outletService || switchService) {
@@ -675,6 +688,13 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		this.api.on('didFinishLaunching', () => {
 			this.log.info(PLATFORM_NAME, 'didFinishLaunching');
 			void this.loadCync();
+		});
+		this.api.on('shutdown', () => {
+			if (this.meshPollTimer) {
+				clearInterval(this.meshPollTimer);
+				this.meshPollTimer = null;
+			}
+			this.polledDeviceIds.clear();
 		});
 		this.accessoryEnv = {
 		  log: this.log,

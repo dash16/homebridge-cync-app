@@ -17,6 +17,7 @@ export type RawFrameListener = (frame: Buffer) => void;
 type TransportMode = 'tls_strict' | 'tls_relaxed' | 'tcp';
 
 const POST_COMMAND_MESH_REFRESH_DELAY_MS = 750;
+const POWER_STATE_CONFIRM_TIMEOUT_MS = 10_000;
 
 function clampNumber(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
@@ -45,6 +46,11 @@ function formatHex(buffer: Buffer): string {
 	return buffer.toString('hex').match(/.{1,2}/g)?.join(' ') ?? '';
 }
 
+function formatHexPrefix(buffer: Buffer, maxBytes = 32): string {
+	const prefix = formatHex(buffer.subarray(0, maxBytes));
+	return buffer.length > maxBytes ? `${prefix} ...` : prefix;
+}
+
 export type LanDeviceUpdate = {
 	deviceId: string;
 	on: boolean;
@@ -62,6 +68,7 @@ export class TcpClient {
 		const pendingCount = this.pendingPowerCommands.size;
 
 		for (const pending of this.pendingPowerCommands.values()) {
+			clearTimeout(pending.confirmationTimer);
 			pending.resolve?.(false);
 		}
 
@@ -105,6 +112,7 @@ export class TcpClient {
 	private reconnectAttempt = 0;
 	private connectInFlight: Promise<void> | null = null;
 	private shuttingDown = false;
+	private readonly unparsedFrameLogCounts = new Map<string, number>();
 	private readonly lanDeviceUpdateListeners: LanDeviceUpdateListener[] = [];
 	private pendingPowerCommands = new Map<string, {
 		deviceId: string;
@@ -114,6 +122,7 @@ export class TcpClient {
 		seq: number;
 		sentAt: number;
 		packetHex: string;
+		confirmationTimer: NodeJS.Timeout;
 		resolve?: (confirmed: boolean) => void;
 	}>();
 	public onLanDeviceUpdate(listener: LanDeviceUpdateListener): void {
@@ -126,6 +135,63 @@ export class TcpClient {
 			} catch (err) {
 				this.log.error('[Cync TCP] lan device update listener threw: %s', String(err));
 			}
+		}
+	}
+
+	private logUnparsedFrame(type: number, frame: Buffer, reason: string): void {
+		const subtype = frame.length >= 14 ? frame[13] : undefined;
+		const controllerId = frame.length >= 4 ? frame.readUInt32BE(0) : undefined;
+		const seq = frame.length >= 6 ? frame.readUInt16BE(4) : undefined;
+		const key = [
+			type.toString(16),
+			subtype === undefined ? 'none' : subtype.toString(16),
+			frame.length,
+			reason,
+		].join(':');
+
+		const count = (this.unparsedFrameLogCounts.get(key) ?? 0) + 1;
+		this.unparsedFrameLogCounts.set(key, count);
+
+		if (count !== 1 && count % 25 !== 0) {
+			return;
+		}
+
+		this.log.debug(
+			'[Cync TCP] Unparsed frame (%s): type=0x%s subtype=%s len=%d controller=%s seq=%s seen=%d prefix=%s',
+			reason,
+			type.toString(16).padStart(2, '0'),
+			subtype === undefined ? 'n/a' : `0x${subtype.toString(16).padStart(2, '0')}`,
+			frame.length,
+			controllerId === undefined ? 'n/a' : `0x${controllerId.toString(16).padStart(8, '0')}`,
+			seq === undefined ? 'n/a' : String(seq),
+			count,
+			formatHexPrefix(frame),
+		);
+	}
+
+	private confirmPendingPowerCommand(
+		deviceId: string,
+		on: boolean,
+		source: string,
+	): void {
+		for (const [key, pending] of this.pendingPowerCommands.entries()) {
+			if (pending.deviceId !== deviceId || pending.on !== on) {
+				continue;
+			}
+
+			clearTimeout(pending.confirmationTimer);
+			this.preferredControllerByDevice.set(deviceId, pending.controllerId);
+			pending.resolve?.(true);
+			this.pendingPowerCommands.delete(key);
+
+			this.log.info(
+				'[Cync TCP] Power state confirmed by %s: device=%s on=%s controller=0x%s ageMs=%d',
+				source,
+				deviceId,
+				String(on),
+				pending.controllerId.toString(16).padStart(8, '0'),
+				Date.now() - pending.sentAt,
+			);
 		}
 	}
 
@@ -443,6 +509,10 @@ export class TcpClient {
 		}, delayMs);
 	}
 
+	public requestMeshStateRefresh(reason: string, delayMs = 0): void {
+		this.scheduleMeshStateRefresh(reason, delayMs);
+	}
+
 	private async refreshMeshState(reason: string): Promise<void> {
 		if (this.meshStateRefreshInFlight) {
 			this.log.debug('[Cync TCP] Mesh-state refresh already in flight; rescheduling (%s)', reason);
@@ -736,7 +806,27 @@ export class TcpClient {
 			const packet = packetBuilder(candidateControllerId, seq);
 
 			const rejected = await new Promise<boolean>((resolve) => {
-				this.pendingPowerCommands.set(`${candidateControllerId}:${seq}`, {
+				const pendingKey = `${candidateControllerId}:${seq}`;
+				const confirmationTimer = setTimeout(() => {
+					const pending = this.pendingPowerCommands.get(pendingKey);
+					if (!pending) {
+						return;
+					}
+
+					this.pendingPowerCommands.delete(pendingKey);
+
+					this.log.warn(
+						'[Cync TCP] %s state not confirmed within %dms: device=%s expectedOn=%s controller=0x%s seq=%d',
+						logLabel,
+						POWER_STATE_CONFIRM_TIMEOUT_MS,
+						deviceId,
+						String(expectedOn),
+						candidateControllerId.toString(16).padStart(8, '0'),
+						seq,
+					);
+				}, POWER_STATE_CONFIRM_TIMEOUT_MS);
+
+				this.pendingPowerCommands.set(pendingKey, {
 					deviceId,
 					on: expectedOn,
 					controllerId: candidateControllerId,
@@ -744,6 +834,7 @@ export class TcpClient {
 					seq,
 					sentAt: Date.now(),
 					packetHex: packet.toString('hex'),
+					confirmationTimer,
 					resolve: (confirmed) => resolve(!confirmed),
 				});
 
@@ -765,7 +856,7 @@ export class TcpClient {
 				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
 
 				this.log.debug(
-					'[Cync TCP] %s command accepted/no immediate rejection: device=%s controller=0x%s',
+					'[Cync TCP] %s command transport accepted; awaiting state confirmation: device=%s controller=0x%s',
 					logLabel,
 					deviceId,
 					candidateControllerId.toString(16).padStart(8, '0'),
@@ -777,7 +868,7 @@ export class TcpClient {
 			}
 		}
 		this.log.warn(
-			'[Cync TCP] %s command not confirmed for device=%s on=%s after trying %d controller(s).',
+			'[Cync TCP] %s command transport rejected for device=%s on=%s after trying %d controller(s).',
 			logLabel,
 			deviceId,
 			String(expectedOn),
@@ -1430,6 +1521,7 @@ export class TcpClient {
 				lastNonZeroBrightnessPct,
 				rgb,
 			});
+			this.confirmPendingPowerCommand(deviceId, on, 'mesh state');
 		}
 	}
 
@@ -1902,8 +1994,11 @@ export class TcpClient {
 					pending?.packetHex ?? 'unknown',
 				);
 
-				pending?.resolve?.(false);
-				this.pendingPowerCommands.delete(pendingKey);
+				if (pending) {
+					clearTimeout(pending.confirmationTimer);
+					pending.resolve?.(false);
+					this.pendingPowerCommands.delete(pendingKey);
+				}
 				this.handleIncomingFrame(body, type);
 			} else {
 				this.handleIncomingFrame(body, type);
@@ -1943,18 +2038,7 @@ export class TcpClient {
 		}
 
 		if (type === 0x43) {
-			this.log.debug(
-				'[Cync TCP] compact frame 0x43: len=%d body=%s b0=%d b1=%d b2=%d b3=%d b4=%d b5=%d b6=%d',
-				frame.length,
-				formatHex(frame),
-				frame[0],
-				frame[1],
-				frame[2],
-				frame[3],
-				frame[4],
-				frame[5],
-				frame[6],
-			);
+			this.logUnparsedFrame(type, frame, 'compact event/status frame');
 		}
 
 		if ((type === 0x73 || type === 0x83) && frame.length >= 14) {
@@ -1984,20 +2068,7 @@ export class TcpClient {
 					lastNonZeroBrightnessPct: lanParsed.lastNonZeroBrightnessPct,
 					rgb,
 				});
-				for (const [key, pending] of this.pendingPowerCommands.entries()) {
-					if (pending.deviceId === devId && pending.on === lanParsed.on) {
-						this.preferredControllerByDevice.set(devId, pending.controllerId);
-						pending.resolve?.(true);
-						this.pendingPowerCommands.delete(key);
-
-						this.log.info(
-							'[Cync TCP] Power command confirmed: device=%s on=%s controller=0x%s',
-							devId,
-							String(lanParsed.on),
-							pending.controllerId.toString(16).padStart(8, '0'),
-						);
-					}
-				}
+				this.confirmPendingPowerCommand(devId, lanParsed.on, 'LAN update');
 
 			} else if (type === 0x83) {
 				// Fallback to legacy controller-level parsing only for 0x83
@@ -2008,8 +2079,22 @@ export class TcpClient {
 						...parsed,
 						deviceId,
 					};
+					if (!deviceId) {
+						this.logUnparsedFrame(type, frame, 'legacy switch update without device mapping');
+					}
 				}
 			}
+		}
+
+		if (
+			payload === frame &&
+			type !== 0x18 &&
+			type !== 0x43 &&
+			type !== 0x78 &&
+			type !== 0x7b &&
+			type !== 0xab
+		) {
+			this.logUnparsedFrame(type, frame, 'no parsed device update');
 		}
 
 		if (this.deviceUpdateCb) {

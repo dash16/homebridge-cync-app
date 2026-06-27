@@ -16,6 +16,8 @@ export type RawFrameListener = (frame: Buffer) => void;
 
 type TransportMode = 'tls_strict' | 'tls_relaxed' | 'tcp';
 
+const POST_COMMAND_MESH_REFRESH_DELAY_MS = 750;
+
 function clampNumber(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
 }
@@ -98,6 +100,8 @@ export class TcpClient {
 	private rawFrameListeners: RawFrameListener[] = [];
 	private controllerToDevice = new Map<number, string>();
 	private reconnectTimer: NodeJS.Timeout | null = null;
+	private meshStateRefreshTimer: NodeJS.Timeout | null = null;
+	private meshStateRefreshInFlight = false;
 	private reconnectAttempt = 0;
 	private connectInFlight: Promise<void> | null = null;
 	private shuttingDown = false;
@@ -418,6 +422,50 @@ export class TcpClient {
 		}, delayMs);
 	}
 
+	private scheduleMeshStateRefresh(
+		reason: string,
+		delayMs = POST_COMMAND_MESH_REFRESH_DELAY_MS,
+	): void {
+		if (this.shuttingDown) {
+			this.log.debug('[Cync TCP] Not scheduling mesh-state refresh (shutting down): %s', reason);
+			return;
+		}
+
+		if (this.meshStateRefreshTimer) {
+			clearTimeout(this.meshStateRefreshTimer);
+		}
+
+		this.log.debug('[Cync TCP] Scheduling mesh-state refresh in %dms (%s)', delayMs, reason);
+
+		this.meshStateRefreshTimer = setTimeout(() => {
+			this.meshStateRefreshTimer = null;
+			void this.refreshMeshState(reason);
+		}, delayMs);
+	}
+
+	private async refreshMeshState(reason: string): Promise<void> {
+		if (this.meshStateRefreshInFlight) {
+			this.log.debug('[Cync TCP] Mesh-state refresh already in flight; rescheduling (%s)', reason);
+			this.scheduleMeshStateRefresh(`in-flight: ${reason}`);
+			return;
+		}
+
+		if (!this.socket || this.socket.destroyed) {
+			this.log.debug('[Cync TCP] Mesh-state refresh skipped; socket unavailable (%s)', reason);
+			return;
+		}
+
+		this.meshStateRefreshInFlight = true;
+		try {
+			this.log.debug('[Cync TCP] Refreshing mesh state (%s)', reason);
+			await this.requestMeshState();
+		} catch (err) {
+			this.log.debug('[Cync TCP] Mesh-state refresh failed (%s): %s', reason, String(err));
+		} finally {
+			this.meshStateRefreshInFlight = false;
+		}
+	}
+
 	private async establishSocket(): Promise<void> {
 		const host = 'cm.gelighting.com';
 		const portTLS = 23779;
@@ -722,6 +770,8 @@ export class TcpClient {
 					deviceId,
 					candidateControllerId.toString(16).padStart(8, '0'),
 				);
+
+				this.scheduleMeshStateRefresh(`${logLabel} command accepted`);
 
 				return;
 			}
@@ -1393,6 +1443,12 @@ export class TcpClient {
 			this.reconnectTimer = null;
 		}
 		this.reconnectAttempt = 0;
+
+		if (this.meshStateRefreshTimer) {
+			clearTimeout(this.meshStateRefreshTimer);
+			this.meshStateRefreshTimer = null;
+		}
+		this.meshStateRefreshInFlight = false;
 
 		if (this.heartbeatTimer) {
 			clearInterval(this.heartbeatTimer);

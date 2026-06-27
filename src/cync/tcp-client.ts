@@ -403,11 +403,18 @@ export class TcpClient {
 		this.reconnectTimer = setTimeout(() => {
 			this.reconnectTimer = null;
 
-			// Fire and forget; ensureConnected() logs failures already
-			void this.ensureConnected().catch((err: unknown) => {
-				this.log.debug('[Cync TCP] Reconnect attempt failed: %s', String(err));
-				this.scheduleReconnect('retry');
-			});
+			void (async () => {
+				try {
+					const connected = await this.ensureConnected();
+					if (!connected) {
+						this.log.debug('[Cync TCP] Reconnect attempt did not establish a socket.');
+						this.scheduleReconnect('retry');
+					}
+				} catch (err: unknown) {
+					this.log.debug('[Cync TCP] Reconnect attempt failed: %s', String(err));
+					this.scheduleReconnect('retry');
+				}
+			})();
 		}, delayMs);
 	}
 
@@ -1735,7 +1742,7 @@ export class TcpClient {
 			this.processIncoming();
 		});
 
-		socket.on('close', () => {
+		socket.on('close', (hadError) => {
 			this.log.warn('[Cync TCP] Socket closed.');
 			this.resetCommandSessionState('establishSocket');
 
@@ -1749,12 +1756,7 @@ export class TcpClient {
 				this.socket = null;
 			}
 
-			this.reconnectAttempt = 0;
-
-			if (this.reconnectTimer) {
-				clearTimeout(this.reconnectTimer);
-				this.reconnectTimer = null;
-			}
+			this.scheduleReconnect(hadError ? 'socket closed after error' : 'socket closed');
 		});
 
 		socket.on('error', (err) => {

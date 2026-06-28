@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.7.0-beta.0
+
+**Release Date:** 2026-06-27
+
+### Added
+- Added automatic TCP reconnect handling after LAN socket closures so Cync state updates can resume without requiring a Homebridge restart.
+- Added post-command mesh-state refreshes after accepted LAN commands to reconcile HomeKit state with device state.
+- Added a shared periodic mesh-state refresh for configured devices to reduce stale HomeKit state during normal operation.
+- Added parsed Cync compact `0x43` LAN state updates for on/off, brightness, RGB mode, and color temperature updates from the Cync app.
+- Added Cync white-preset color-temperature calibration so Cync presets map onto HomeKit mired values more predictably.
+- Added README documentation explaining how Cync white presets map to HomeKit color temperature controls.
+
+### Changed
+- Improved LAN power command handling to wait for real state confirmation from LAN or mesh-state updates instead of treating transport acceptance as final success.
+- Improved bidirectional sync between the Cync app and Home app for plugs and lights, including on/off, brightness, RGB, and color temperature state.
+- Consolidated per-device polling into a shared mesh refresh loop to reduce duplicate refresh traffic.
+- Reduced routine LAN refresh and repeated already-cached update logging from info-level noise to debug-level diagnostics.
+- Updated color-temperature state handling so HomeKit Hue and Saturation are neutralized when a light is in tunable-white mode.
+
+### Fixed
+- Fixed LAN reconnect scheduling after socket close events.
+- Fixed Cync app changes sometimes failing to appear in HomeKit until another command or restart occurred.
+- Fixed color-temperature updates from Cync white presets being interpreted with an overly broad tone range.
+- Fixed stale RGB state causing HomeKit to appear to show color mode after selecting a Cync white-temperature preset.
+- Fixed command resolution for power changes by confirming the resulting device state instead of relying only on ACK/status frames.
+
 ## v0.6.1
 
 **Release Date:** 2026-06-23

@@ -1,8 +1,8 @@
 # Changelog
 
-## v0.7.0-beta.0
+## v0.7.0
 
-**Release Date:** 2026-06-27
+**Release Date:** 2026-07-04
 
 ### Added
 - Added automatic TCP reconnect handling after LAN socket closures so Cync state updates can resume without requiring a Homebridge restart.
@@ -25,6 +25,9 @@
 - Fixed color-temperature updates from Cync white presets being interpreted with an overly broad tone range.
 - Fixed stale RGB state causing HomeKit to appear to show color mode after selecting a Cync white-temperature preset.
 - Fixed command resolution for power changes by confirming the resulting device state instead of relying only on ACK/status frames.
+
+### Notes
+- This release includes the LAN sync improvements first published as `v0.7.0-beta.0` on 2026-06-27
 
 ## v0.6.1
 

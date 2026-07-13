@@ -69,7 +69,7 @@ export function configureCyncSwitchAccessory(
 				return currentOn;
 			}
 
-			env.log.info(
+			env.log.debug(
 				'Cync: On.get -> %s for %s (deviceId=%s)',
 				String(currentOn),
 				deviceName,

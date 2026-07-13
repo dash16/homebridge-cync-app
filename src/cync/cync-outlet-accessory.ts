@@ -79,7 +79,7 @@ export function configureCyncOutletAccessory(
 				return currentOn;
 			}
 
-			env.log.info(
+			env.log.debug(
 				'Cync: Outlet On.get -> %s for %s (deviceId=%s)',
 				String(currentOn),
 				deviceName,

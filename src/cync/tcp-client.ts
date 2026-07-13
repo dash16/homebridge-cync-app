@@ -1225,7 +1225,7 @@ export class TcpClient {
 			const packet = this.buildMeshInfoRequest(controllerId, seq);
 			this.writeSocket(packet, 'mesh-state request');
 
-			this.log.info(
+			this.log.debug(
 				'[Cync TCP] Requested mesh state: controller=0x%s home=%s seq=%d packet=%s',
 				controllerId.toString(16).padStart(8, '0'),
 				homeId,

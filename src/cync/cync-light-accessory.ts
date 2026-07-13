@@ -178,7 +178,7 @@ export function configureCyncLightAccessory(
 				return currentOn;
 			}
 
-			env.log.info(
+			env.log.debug(
 				'Cync: Light On.get -> %s for %s (deviceId=%s)',
 				String(currentOn),
 				deviceName,

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.1
+
+**Release Date:** 2026-07-13
+
+### Added
+- Added a startup completion log after Cync cloud discovery and accessory setup finish, including mesh, device, and accessory counts.
+
+### Changed
+- Reduced routine HomeKit state reads and Cync TCP mesh-state request logs from `info` to `debug` to keep normal Homebridge logs focused on startup and explicit user changes.
+
 ## v0.7.0
 
 **Release Date:** 2026-07-04

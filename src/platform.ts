@@ -991,10 +991,18 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private discoverDevices(cloudConfig: CyncCloudConfig): void {
 		if (!cloudConfig.meshes?.length) {
 			this.log.warn('Cync: no meshes returned from cloud; nothing to discover.');
+			this.log.info(
+				'Cync: platform finished loading; meshes=0 devices=0 accessories=%d',
+				this.accessories.length,
+			);
 			return;
 		}
 
 		this.showAccessoryRegistrationDisabled = false;
+		const deviceCount = cloudConfig.meshes.reduce(
+			(count, mesh) => count + (mesh.devices?.length ?? 0),
+			0,
+		);
 
 		// Physical devices are mandatory. Configure all of them before optional
 		// show accessories can consume the remaining Homebridge bridge capacity.
@@ -1601,5 +1609,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 			}
 		}
+
+		this.log.info(
+			'Cync: platform finished loading; meshes=%d devices=%d accessories=%d',
+			cloudConfig.meshes.length,
+			deviceCount,
+			this.accessories.length,
+		);
 	}
 }

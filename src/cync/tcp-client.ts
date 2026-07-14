@@ -22,6 +22,11 @@ const CTC_MIN_MIRED = 153;
 const CTC_MAX_MIRED = 500;
 const CYNC_CT_WARM_TONE = 24;
 const CYNC_CT_COOL_TONE = 100;
+const ROUTINE_SOCKET_WRITE_LABELS = new Set([
+	'heartbeat',
+	'controller ping',
+	'mesh-state request',
+]);
 
 function clampNumber(n: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, n));
@@ -134,6 +139,7 @@ export class TcpClient {
 	private reconnectAttempt = 0;
 	private connectInFlight: Promise<void> | null = null;
 	private shuttingDown = false;
+	private hasLoggedInitialSocketConnection = false;
 	private readonly unparsedFrameLogCounts = new Map<string, number>();
 	private readonly lanDeviceUpdateListeners: LanDeviceUpdateListener[] = [];
 	private pendingPowerCommands = new Map<string, {
@@ -623,8 +629,13 @@ export class TcpClient {
 		const host = 'cm.gelighting.com';
 		const portTLS = 23779;
 		const portTCP = 23778;
+		const isInitialSocketConnection = !this.hasLoggedInitialSocketConnection;
 
-		this.log.info('[Cync TCP] Connecting to %s…', host);
+		if (isInitialSocketConnection) {
+			this.log.info('[Cync TCP] Connecting to %s…', host);
+		} else {
+			this.log.debug('[Cync TCP] Connecting to %s…', host);
+		}
 
 		this.resetCommandSessionState('establishSocket');
 
@@ -668,10 +679,15 @@ export class TcpClient {
 
 		if (this.loginCode && this.loginCode.length > 0) {
 			this.socket.write(Buffer.from(this.loginCode));
-			this.log.info('[Cync TCP] Login code sent (%d bytes).', this.loginCode.length);
+			if (isInitialSocketConnection) {
+				this.log.info('[Cync TCP] Login code sent (%d bytes).', this.loginCode.length);
+			} else {
+				this.log.debug('[Cync TCP] Login code sent (%d bytes).', this.loginCode.length);
+			}
 		} else {
 			this.log.warn('[Cync TCP] establishSocket() reached with no loginCode; skipping auth write.');
 		}
+		this.hasLoggedInitialSocketConnection = true;
 
 		this.startHeartbeat();
 		this.reconnectAttempt = 0;
@@ -1978,7 +1994,10 @@ export class TcpClient {
 		});
 
 		socket.on('close', (hadError) => {
-			this.log.warn('[Cync TCP] Socket closed.');
+			this.log.debug(
+				'[Cync TCP] Socket closed%s.',
+				hadError ? ' after error' : '',
+			);
 			this.resetCommandSessionState('establishSocket');
 
 			if (this.heartbeatTimer) {
@@ -2001,7 +2020,11 @@ export class TcpClient {
 
 	private writeSocket(packet: Buffer, label: string): void {
 		if (!this.socket || this.socket.destroyed) {
-			this.log.warn('[Cync TCP] %s: socket not available for write.', label);
+			if (ROUTINE_SOCKET_WRITE_LABELS.has(label)) {
+				this.log.debug('[Cync TCP] %s: socket not available for write.', label);
+			} else {
+				this.log.warn('[Cync TCP] %s: socket not available for write.', label);
+			}
 			return;
 		}
 

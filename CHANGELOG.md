@@ -8,7 +8,7 @@
 - Added a startup completion log after Cync cloud discovery and accessory setup finish, including mesh, device, and accessory counts.
 
 ### Changed
-- Reduced routine HomeKit state reads and Cync TCP mesh-state request logs from `info` to `debug` to keep normal Homebridge logs focused on startup and explicit user changes.
+- Reduced routine HomeKit state reads, Cync TCP mesh-state request logs, reconnect lifecycle logs, and background socket write misses from `info`/`warn` to `debug` to keep normal Homebridge logs focused on startup and explicit user changes.
 
 ## v0.7.0
 

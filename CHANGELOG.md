@@ -2,7 +2,7 @@
 
 ## v0.7.1
 
-**Release Date:** 2026-07-13
+**Release Date:** 2026-07-17
 
 ### Added
 - Added a startup completion log after Cync cloud discovery and accessory setup finish, including mesh, device, and accessory counts.

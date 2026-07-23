@@ -121,6 +121,18 @@ Certain Cync device types are exposed as outlets instead of generic switches to 
 
 The plugin attempts to communicate with supported devices locally over the network for improved responsiveness compared to cloud-only control.
 
+### Unreachable Accessories
+
+Smart bulbs cannot report an OFF state when a wall switch removes their power. By default, an accessory that has not reported state for three minutes is therefore shown as **No Response** instead of continuing to display a stale ON state.
+
+This behavior can be adjusted in the plugin settings:
+
+- **Show No Response** (default): preserve the last confirmed state but report the accessory as unavailable.
+- **Assume Off**: provisionally return OFF after the unreachable timeout. This is useful when physical switches commonly remove power, but it may show false OFF states during network outages.
+- **Keep Cached State**: retain the last confirmed state, matching the plugin's previous behavior.
+
+The unreachable timeout is configurable from 30 to 3600 seconds. When connectivity returns, a confirmed device update always replaces the provisional or cached state.
+
 ---
 
 ## Troubleshooting

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Preserved structured Cync refresh error codes so permanently rejected refresh tokens can be distinguished from temporary network or server failures.
+- Cleared permanently rejected refresh tokens and automatically requested a fresh 2FA code, avoiding repeated refresh failures and an extra config-edit/restart cycle.
+- Preserved stored tokens after temporary refresh failures so they can be retried later.
+
 ## v0.7.1
 
 **Release Date:** 2026-07-17

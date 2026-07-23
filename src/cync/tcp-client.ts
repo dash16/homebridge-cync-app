@@ -18,6 +18,10 @@ type TransportMode = 'tls_strict' | 'tls_relaxed' | 'tcp';
 
 const POST_COMMAND_MESH_REFRESH_DELAY_MS = 750;
 const POWER_STATE_CONFIRM_TIMEOUT_MS = 10_000;
+const MESH_STATE_RESPONSE_TIMEOUT_MS = 3_000;
+const MESH_STATE_FAILURES_BEFORE_RECONNECT = 3;
+const POST_LOGIN_SETTLE_DELAY_MS = 1_500;
+const RECONNECT_STABLE_WINDOW_MS = 30_000;
 const CTC_MIN_MIRED = 153;
 const CTC_MAX_MIRED = 500;
 const CYNC_CT_WARM_TONE = 24;
@@ -100,6 +104,11 @@ export class TcpClient {
 		}
 
 		this.pendingPowerCommands.clear();
+		for (const pending of this.pendingMeshStateResponses.values()) {
+			clearTimeout(pending.timer);
+			pending.resolve(false);
+		}
+		this.pendingMeshStateResponses.clear();
 		this.seq = 0;
 		this.readBuffer = Buffer.alloc(0);
 
@@ -134,8 +143,14 @@ export class TcpClient {
 	private rawFrameListeners: RawFrameListener[] = [];
 	private controllerToDevice = new Map<number, string>();
 	private reconnectTimer: NodeJS.Timeout | null = null;
+	private reconnectStableTimer: NodeJS.Timeout | null = null;
 	private meshStateRefreshTimer: NodeJS.Timeout | null = null;
 	private meshStateRefreshInFlight = false;
+	private consecutiveMeshStateRefreshFailures = 0;
+	private pendingMeshStateResponses = new Map<string, {
+		timer: NodeJS.Timeout;
+		resolve: (received: boolean) => void;
+	}>();
 	private reconnectAttempt = 0;
 	private connectInFlight: Promise<void> | null = null;
 	private shuttingDown = false;
@@ -511,7 +526,7 @@ export class TcpClient {
 			!this.socket.destroyed &&
 			this.switchIdToHomeId.size > 0
 		) {
-			void this.requestMeshState();
+			this.scheduleMeshStateRefresh('LAN topology applied', 0);
 		}
 	}
 
@@ -617,7 +632,27 @@ export class TcpClient {
 		this.meshStateRefreshInFlight = true;
 		try {
 			this.log.debug('[Cync TCP] Refreshing mesh state (%s)', reason);
-			await this.requestMeshState();
+			const refreshed = await this.requestMeshState();
+			if (refreshed) {
+				this.consecutiveMeshStateRefreshFailures = 0;
+			} else {
+				this.consecutiveMeshStateRefreshFailures += 1;
+				this.log.warn(
+					'[Cync TCP] Mesh-state refresh received no valid response (%s); consecutiveFailures=%d',
+					reason,
+					this.consecutiveMeshStateRefreshFailures,
+				);
+
+				if (
+					this.consecutiveMeshStateRefreshFailures >= MESH_STATE_FAILURES_BEFORE_RECONNECT &&
+					this.socket &&
+					!this.socket.destroyed
+				) {
+					this.log.warn('[Cync TCP] Reconnecting after repeated unanswered mesh-state refreshes.');
+					this.consecutiveMeshStateRefreshFailures = 0;
+					this.socket.destroy();
+				}
+			}
 		} catch (err) {
 			this.log.debug('[Cync TCP] Mesh-state refresh failed (%s): %s', reason, String(err));
 		} finally {
@@ -690,20 +725,44 @@ export class TcpClient {
 		this.hasLoggedInitialSocketConnection = true;
 
 		this.startHeartbeat();
-		this.reconnectAttempt = 0;
 		if (this.reconnectTimer) {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
+		if (this.reconnectStableTimer) {
+			clearTimeout(this.reconnectStableTimer);
+		}
+		// Opening a TCP socket is not proof that the session is healthy. Cync may
+		// accept login and then close the connection during discovery. Only reset
+		// exponential backoff after the session has remained open for a while.
+		const establishedSocket = this.socket;
+		this.reconnectStableTimer = setTimeout(() => {
+			this.reconnectStableTimer = null;
+			if (
+				!this.shuttingDown &&
+				this.socket === establishedSocket &&
+				!establishedSocket.destroyed
+			) {
+				this.reconnectAttempt = 0;
+				this.log.debug(
+					'[Cync TCP] Connection stable for %dms; reset reconnect backoff.',
+					RECONNECT_STABLE_WINDOW_MS,
+				);
+			}
+		}, RECONNECT_STABLE_WINDOW_MS);
 
-		// Brief delay so the server finishes processing the login write
+		// Give the server time to finish processing the login write
 		// before we ask it to dump mesh state. Runs on every reconnect, so
 		// HomeKit resyncs after a network blip without user intervention.
 		setTimeout(() => {
-			if (!this.shuttingDown && this.socket && !this.socket.destroyed) {
-				void this.requestMeshState();
+			if (
+				!this.shuttingDown &&
+				this.socket === establishedSocket &&
+				!establishedSocket.destroyed
+			) {
+				this.scheduleMeshStateRefresh('socket established', 0);
 			}
-		}, 500);
+		}, POST_LOGIN_SETTLE_DELAY_MS);
 	}
 
 	private cleanupSocket(sock: net.Socket | null): void {
@@ -1190,11 +1249,40 @@ export class TcpClient {
 		return Buffer.concat([header, switchBytes, seqBytes, tail]);
 	}
 
-	private async requestMeshState(): Promise<void> {
-		const socket = this.socket;
-		if (!socket || socket.destroyed) {
+	private waitForMeshStateResponse(homeId: string): Promise<boolean> {
+		const previous = this.pendingMeshStateResponses.get(homeId);
+		if (previous) {
+			clearTimeout(previous.timer);
+			previous.resolve(false);
+		}
+
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				this.pendingMeshStateResponses.delete(homeId);
+				resolve(false);
+			}, MESH_STATE_RESPONSE_TIMEOUT_MS);
+
+			this.pendingMeshStateResponses.set(homeId, { timer, resolve });
+		});
+	}
+
+	private resolveMeshStateResponse(homeId: string): void {
+		const pending = this.pendingMeshStateResponses.get(homeId);
+		if (!pending) {
 			return;
 		}
+
+		clearTimeout(pending.timer);
+		this.pendingMeshStateResponses.delete(homeId);
+		pending.resolve(true);
+	}
+
+	private async requestMeshState(): Promise<boolean> {
+		const socket = this.socket;
+		if (!socket || socket.destroyed) {
+			return false;
+		}
+		const isCurrentSocket = () => this.socket === socket && !socket.destroyed;
 
 		// Topology may not be applied yet if connect() raced ahead of
 		// applyLanTopology(). In that case bail out — applyLanTopology() will
@@ -1203,11 +1291,14 @@ export class TcpClient {
 			this.log.debug(
 				'[Cync TCP] requestMeshState skipped: LAN topology not yet applied.',
 			);
-			return;
+			return false;
 		}
 
 		// Step 1: ping every known controller ~150ms apart.
 		for (const controllerId of this.switchIdToHomeId.keys()) {
+			if (!isCurrentSocket()) {
+				return false;
+			}
 			const seq = this.nextSeq();
 			const packet = this.buildControllerPing(controllerId, seq);
 			this.writeSocket(packet, 'controller ping');
@@ -1225,30 +1316,54 @@ export class TcpClient {
 		// for state.
 		await new Promise((resolve) => setTimeout(resolve, 500));
 
-		if (!this.socket || this.socket.destroyed) {
-			return;
+		if (!isCurrentSocket()) {
+			return false;
 		}
 
-		// Step 3: one 0x52 query per home — the response covers all devices in that mesh.
-		const seenHomes = new Set<string>();
-		for (const [controllerId, homeId] of this.switchIdToHomeId.entries()) {
-			if (seenHomes.has(homeId)) {
-				continue;
+		// Step 3: query each home until one of its controllers returns a valid response.
+		const homes = [...new Set(this.switchIdToHomeId.values())];
+		let refreshedHomes = 0;
+		for (const homeId of homes) {
+			const controllers = [...this.switchIdToHomeId.entries()]
+				.filter(([, candidateHomeId]) => candidateHomeId === homeId)
+				.map(([controllerId]) => controllerId);
+
+			for (const controllerId of controllers) {
+				if (!isCurrentSocket()) {
+					return false;
+				}
+
+				const response = this.waitForMeshStateResponse(homeId);
+				const seq = this.nextSeq();
+				const packet = this.buildMeshInfoRequest(controllerId, seq);
+				this.writeSocket(packet, 'mesh-state request');
+
+				this.log.debug(
+					'[Cync TCP] Requested mesh state: controller=0x%s home=%s seq=%d packet=%s',
+					controllerId.toString(16).padStart(8, '0'),
+					homeId,
+					seq,
+					formatHex(packet),
+				);
+
+				if (await response) {
+					refreshedHomes += 1;
+					break;
+				}
+
+				if (!isCurrentSocket()) {
+					return false;
+				}
+
+				this.log.debug(
+					'[Cync TCP] Mesh-state request timed out: controller=0x%s home=%s; trying next controller',
+					controllerId.toString(16).padStart(8, '0'),
+					homeId,
+				);
 			}
-			seenHomes.add(homeId);
-
-			const seq = this.nextSeq();
-			const packet = this.buildMeshInfoRequest(controllerId, seq);
-			this.writeSocket(packet, 'mesh-state request');
-
-			this.log.debug(
-				'[Cync TCP] Requested mesh state: controller=0x%s home=%s seq=%d packet=%s',
-				controllerId.toString(16).padStart(8, '0'),
-				homeId,
-				seq,
-				formatHex(packet),
-			);
 		}
+
+		return homes.length > 0 && refreshedHomes === homes.length;
 	}
 
 	public async activateLightShow(
@@ -1581,6 +1696,8 @@ export class TcpClient {
 			return;
 		}
 
+		this.resolveMeshStateResponse(homeId);
+
 		const recordsStart = 22;
 		// Trailing checksum (1 byte) + frame terminator (0x7e) sit after the records,
 		// so require strictly more than 24 bytes remaining.
@@ -1637,6 +1754,10 @@ export class TcpClient {
 		if (this.reconnectTimer) {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
+		}
+		if (this.reconnectStableTimer) {
+			clearTimeout(this.reconnectStableTimer);
+			this.reconnectStableTimer = null;
 		}
 		this.reconnectAttempt = 0;
 
@@ -2003,6 +2124,10 @@ export class TcpClient {
 			if (this.heartbeatTimer) {
 				clearInterval(this.heartbeatTimer);
 				this.heartbeatTimer = null;
+			}
+			if (this.reconnectStableTimer) {
+				clearTimeout(this.reconnectStableTimer);
+				this.reconnectStableTimer = null;
 			}
 
 			this.cleanupSocket(socket);

@@ -73,6 +73,7 @@ export interface CyncAccessoryEnv {
 	tcpClient: TcpClient;
 
 	isDeviceProbablyOffline(deviceId: string): boolean;
+	resolveOfflineOnState(currentOn: boolean): boolean;
 	markDeviceSeen(deviceId: string): void;
 	startPollingDevice(deviceId: string): void;
 	registerAccessoryForDevice(deviceId: string, accessory: PlatformAccessory): void;

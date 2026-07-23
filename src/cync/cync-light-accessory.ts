@@ -170,12 +170,12 @@ export function configureCyncLightAccessory(
 
 			if (env.isDeviceProbablyOffline(deviceId)) {
 				env.log.debug(
-					'Cync: Light On.get offline-heuristic hit; returning cached=%s for %s (deviceId=%s)',
+					'Cync: Light On.get offline-heuristic hit; applying unreachable-state policy with cached=%s for %s (deviceId=%s)',
 					String(currentOn),
 					deviceName,
 					deviceId,
 				);
-				return currentOn;
+				return env.resolveOfflineOnState(currentOn);
 			}
 
 			env.log.debug(

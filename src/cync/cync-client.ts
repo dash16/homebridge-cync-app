@@ -16,6 +16,11 @@ type SessionWithPossibleTokens = {
 	expiresAt?: number;
 };
 
+type RefreshAccessTokenResult =
+	| { status: 'refreshed'; token: CyncTokenData }
+	| { status: 'rejected' }
+	| { status: 'failed' };
+
 const defaultLogger: CyncLogger = {
 	debug: (...args: unknown[]) => console.debug('[cync-client]', ...args),
 	info: (...args: unknown[]) => console.info('[cync-client]', ...args),
@@ -211,23 +216,38 @@ export class CyncClient {
 					'CyncClient: stored access token is expired or near expiry; refreshing before use.',
 				);
 
-				const refreshed = await this.refreshAccessToken(stored);
-				if (!refreshed) {
+				const refreshResult = await this.refreshAccessToken(stored);
+				if (refreshResult.status !== 'refreshed') {
 					this.log.error(
-						'CyncClient: unable to refresh stored token; reauthentication is required.',
+						refreshResult.status === 'rejected'
+							? 'CyncClient: Cync rejected the stored refresh token; reauthentication is required.'
+							: 'CyncClient: token refresh failed temporarily; the stored token was preserved for a later retry.',
 					);
 
 					this.tokenData = null;
 
-					if (this.hasConfiguredTwoFactorCode()) {
-						this.log.error(
-							'CyncClient: a twoFactor code is still present in config. Cync verification codes expire quickly, so this code will not be reused.',
-						);
-						this.log.error(
-							'CyncClient: remove stale twoFactor value from config, request a fresh code, then add the new code and restart.',
-						);
+					if (refreshResult.status === 'failed') {
 						return false;
 					}
+
+					const { username, password } = this.loginConfig;
+					if (!username || !password) {
+						this.log.error('CyncClient: username and password are required to obtain a new token.');
+						return false;
+					}
+
+					if (this.hasConfiguredTwoFactorCode()) {
+						this.log.error(
+							'CyncClient: the configured twoFactor code is stale and will not be reused.',
+						);
+					}
+
+					this.log.info('Cync: requesting a fresh 2FA code for %s', username);
+					await this.requestTwoFactorCode(username);
+					this.log.info(
+						'Cync: a fresh 2FA code was sent. Replace "twoFactor" in the plugin config with the new code, save, and restart Homebridge.',
+					);
+					return false;
 				} else {
 					return true; // refreshAccessToken() already saves + applies
 				}
@@ -436,12 +456,13 @@ export class CyncClient {
 	// Token Refresh Helper: exchanges refreshToken for a new accessToken (no password fallback)
 	private async refreshAccessToken(
 		stored: CyncTokenData,
-	): Promise<CyncTokenData | null> {
+	): Promise<RefreshAccessTokenResult> {
 		if (!stored.refreshToken) {
 			this.log.warn(
 				'CyncClient: refreshAccessToken() called but no refreshToken is stored; reauth will be required.',
 			);
-			return null;
+			await this.tokenStore.clear();
+			return { status: 'rejected' };
 		}
 
 		try {
@@ -464,10 +485,27 @@ export class CyncClient {
 				next.expiresAt ? new Date(next.expiresAt).toISOString() : 'unknown',
 			);
 
-			return next;
+			return { status: 'refreshed', token: next };
 		} catch (err) {
-			this.log.error('CyncClient: token refresh failed: %o', err);
-			return null;
+			const apiError = this.unwrapApiError(err);
+			const refreshTokenRejected =
+				apiError.code === 4001010 ||
+				(apiError.status === 400 && apiError.msg === 'refresh token error');
+
+			if (refreshTokenRejected) {
+				await this.tokenStore.clear();
+				this.log.warn(
+					'CyncClient: Cync permanently rejected the refresh token (%s); cleared it from storage.',
+					this.formatApiError(err),
+				);
+				return { status: 'rejected' };
+			}
+
+			this.log.error(
+				'CyncClient: token refresh failed (%s); keeping the stored token for retry.',
+				this.formatApiError(err),
+			);
+			return { status: 'failed' };
 		}
 	}
 
@@ -481,8 +519,8 @@ export class CyncClient {
 					'CyncClient: access token expired when calling getCloudConfig(); refreshing and retrying once.',
 				);
 
-				const refreshed = await this.refreshAccessToken(this.tokenData);
-				if (refreshed) {
+				const refreshResult = await this.refreshAccessToken(this.tokenData);
+				if (refreshResult.status === 'refreshed') {
 					return await this.configClient.getCloudConfig();
 				}
 			}
@@ -521,8 +559,8 @@ export class CyncClient {
 					'CyncClient: access token expired when calling getDeviceProperties(); refreshing and retrying once.',
 				);
 
-				const refreshed = await this.refreshAccessToken(this.tokenData);
-				if (refreshed) {
+				const refreshResult = await this.refreshAccessToken(this.tokenData);
+				if (refreshResult.status === 'refreshed') {
 					return await this.configClient.getDeviceProperties(productIdStr, String(meshId));
 				}
 			}

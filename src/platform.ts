@@ -145,7 +145,8 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	private meshPollTimer: NodeJS.Timeout | null = null;
 	private showAccessoryRegistrationDisabled = false;
 
-	private readonly offlineTimeoutMs = 30 * 60 * 1000;
+	private readonly offlineTimeoutMs: number;
+	private readonly unreachableStatePolicy: 'no-response' | 'assume-off' | 'cached';
 
 	private setMainAccessoryOnForDevice(deviceId: string, on: boolean): void {
 		const accessory = this.deviceIdToAccessory.get(deviceId);
@@ -399,6 +400,20 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			return false;
 		}
 		return Date.now() - last > this.offlineTimeoutMs;
+	}
+
+	private resolveOfflineOnState(currentOn: boolean): boolean {
+		if (this.unreachableStatePolicy === 'assume-off') {
+			return false;
+		}
+
+		if (this.unreachableStatePolicy === 'cached') {
+			return currentOn;
+		}
+
+		throw new this.api.hap.HapStatusError(
+			this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+		);
 	}
 
 	private cleanupDisabledShowAccessoriesForDevice(
@@ -687,6 +702,17 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 
 		// Extract login config from platform config
 		const raw = this.config as Record<string, unknown>;
+		const configuredPolicy = raw.unreachableStatePolicy;
+		this.unreachableStatePolicy =
+			configuredPolicy === 'assume-off' || configuredPolicy === 'cached'
+				? configuredPolicy
+				: 'no-response';
+		const configuredTimeoutSeconds = Number(raw.unreachableTimeoutSeconds);
+		this.offlineTimeoutMs = (
+			Number.isFinite(configuredTimeoutSeconds) && configuredTimeoutSeconds >= 30
+				? configuredTimeoutSeconds
+				: 180
+		) * 1000;
 
 		// Canonical config keys: username, password, twoFactor
 		const username =
@@ -746,6 +772,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		  api: this.api,
 		  tcpClient: this.tcpClient,
 		  isDeviceProbablyOffline: this.isDeviceProbablyOffline.bind(this),
+		  resolveOfflineOnState: this.resolveOfflineOnState.bind(this),
 		  markDeviceSeen: this.markDeviceSeen.bind(this),
 		  startPollingDevice: this.startPollingDevice.bind(this),
 		  registerLightShowAccessoryForDevice: this.registerLightShowAccessoryForDevice.bind(this),

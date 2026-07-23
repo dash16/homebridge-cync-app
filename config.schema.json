@@ -30,6 +30,25 @@
 				"pattern": "^[0-9]{6}$",
 				"description": "Temporary 6-digit code emailed by Cync when you sign in. Leave blank normally; only needed when performing a fresh login."
 			},
+			"unreachableStatePolicy": {
+				"title": "Unreachable Accessory State",
+				"type": "string",
+				"default": "no-response",
+				"oneOf": [
+					{ "title": "Show No Response", "enum": ["no-response"] },
+					{ "title": "Assume Off", "enum": ["assume-off"] },
+					{ "title": "Keep Cached State", "enum": ["cached"] }
+				],
+				"description": "How HomeKit should represent an accessory that has not reported state within the timeout. No Response is the most accurate default."
+			},
+			"unreachableTimeoutSeconds": {
+				"title": "Unreachable Timeout",
+				"type": "integer",
+				"default": 180,
+				"minimum": 30,
+				"maximum": 3600,
+				"description": "Seconds since the last device update before the accessory is treated as unreachable."
+			},
 			"deviceShowConfigs": {
 				"title": "Shows by Device",
 				"type": "array",

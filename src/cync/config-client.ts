@@ -33,7 +33,7 @@ type CyncErrorBody = {
 	[key: string]: unknown;
 };
 
-type CyncApiError = {
+export type CyncApiError = {
 	status: number;
 	statusText: string;
 	body: unknown;
@@ -515,11 +515,15 @@ export class ConfigClient {
 				res.statusText,
 				json,
 			);
-			const errBody = json as CyncErrorBody;
-			const msg =
-				errBody.error?.msg ??
-				`Cync refresh failed with status ${res.status} ${res.statusText}`;
-			throw new Error(msg);
+			const { code, msg } = extractCyncError(json);
+			const error: CyncApiError = {
+				status: res.status,
+				statusText: res.statusText,
+				body: json,
+				code,
+				msg: msg ?? `Cync refresh failed with status ${res.status} ${res.statusText}`,
+			};
+			throw error;
 		}
 
 		const obj = json as Record<string, unknown>;

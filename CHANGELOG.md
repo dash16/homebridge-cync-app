@@ -1,11 +1,24 @@
 # Changelog
 
-## Unreleased
+## v0.7.2
+
+**Release Date:** 2026-07-26
+
+### Added
+- Added configurable handling for accessories that stop reporting state: show **No Response** (default), provisionally assume they are off, or keep their cached state.
+- Added a configurable unreachable timeout from 30 to 3600 seconds, defaulting to three minutes.
+
+### Changed
+- Improved LAN mesh-state refreshes by waiting for valid responses and trying alternate controllers when a controller does not respond.
+- Added a post-login settling delay and bounded exponential reconnect backoff that resets only after the TCP session remains stable.
 
 ### Fixed
 - Preserved structured Cync refresh error codes so permanently rejected refresh tokens can be distinguished from temporary network or server failures.
 - Cleared permanently rejected refresh tokens and automatically requested a fresh 2FA code, avoiding repeated refresh failures and an extra config-edit/restart cycle.
 - Preserved stored tokens after temporary refresh failures so they can be retried later.
+- Reconnected the LAN session after repeated unanswered mesh-state refreshes.
+- Prevented interrupted mesh refreshes from continuing to send controller requests through a replacement socket.
+- Prevented rapid Cync TCP reconnect loops when the server accepts login and then immediately closes the session.
 
 ## v0.7.1
 

@@ -44,7 +44,7 @@
 			"unreachableTimeoutSeconds": {
 				"title": "Unreachable Timeout",
 				"type": "integer",
-				"default": 180,
+				"default": 600,
 				"minimum": 30,
 				"maximum": 3600,
 				"description": "Seconds since the last device update before the accessory is treated as unreachable."

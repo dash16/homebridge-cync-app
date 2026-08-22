@@ -105,9 +105,9 @@ Show selections are stored by Cync device ID, so renaming a device does not rese
 
 Some Cync devices expose both RGB color and color temperature controls. HomeKit may present these differently depending on the accessory category and Home app behavior.
 
-Cync white presets are exposed to HomeKit as color temperature values, not as RGB colors. The Cync app presents presets such as **Cool White**, **Daylight**, **Sunlight**, **Natural White**, **Early Morning**, **Sunrise**, and **Warm White** as a discrete ladder. HomeKit represents the same idea as a continuous color-temperature slider using mired values, where lower mired values are cooler and higher mired values are warmer.
+Cync white presets are exposed to HomeKit as color temperature values, not as RGB colors. The Cync app presents presets such as **Cool White**, **Daylight**, **Sunlight**, **Natural White**, **Early Morning**, **Sunrise**, **Warm White**, **Sunset**, and **Candle Light** as a discrete ladder. Some of the warmer presets may be below the initially visible portion of Cync's selector and require scrolling. HomeKit represents the same idea as a continuous color-temperature slider using mired values, where lower mired values are cooler and higher mired values are warmer.
 
-Because of that, the Home app may not visually match the Cync preset list one-for-one. For example, **Natural White** may appear near the center of HomeKit's temperature gradient, while **Cool White** and **Warm White** should appear near the cool and warm ends respectively. This is expected: HomeKit is showing the calibrated temperature position, while the Cync app is showing named presets.
+Because of that, the Home app may not visually match the Cync preset list one-for-one. For example, **Natural White** may appear near the center of HomeKit's temperature gradient, while **Cool White** and **Candle Light** should appear near the cool and warm ends respectively. This is expected: HomeKit is showing the calibrated temperature position, while the Cync app is showing named presets.
 
 The Home app's **Swatch** tab can look visually similar to Cync's white presets, but swatches are RGB color selections. Choosing a swatch may put the device into RGB color mode instead of tunable-white color-temperature mode. For best white-temperature behavior, use the Temperature control in HomeKit or the white preset list in the Cync app.
 
@@ -123,7 +123,7 @@ The plugin attempts to communicate with supported devices locally over the netwo
 
 ### Unreachable Accessories
 
-Smart bulbs cannot report an OFF state when a wall switch removes their power. By default, an accessory that has not reported state for three minutes is therefore shown as **No Response** instead of continuing to display a stale ON state.
+Smart bulbs cannot report an OFF state when a wall switch removes their power. By default, an accessory that has not reported state for ten minutes is therefore shown as **No Response** instead of continuing to display a stale ON state. This allows two scheduled five-minute mesh refresh opportunities before a quiet accessory is considered unreachable.
 
 This behavior can be adjusted in the plugin settings:
 

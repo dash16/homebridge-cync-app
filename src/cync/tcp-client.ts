@@ -24,7 +24,7 @@ const POST_LOGIN_SETTLE_DELAY_MS = 1_500;
 const RECONNECT_STABLE_WINDOW_MS = 30_000;
 const CTC_MIN_MIRED = 153;
 const CTC_MAX_MIRED = 500;
-const CYNC_CT_WARM_TONE = 24;
+const CYNC_CT_WARM_TONE = 1;
 const CYNC_CT_COOL_TONE = 100;
 const ROUTINE_SOCKET_WRITE_LABELS = new Set([
 	'heartbeat',
@@ -635,10 +635,10 @@ export class TcpClient {
 			const refreshed = await this.requestMeshState();
 			if (refreshed) {
 				this.consecutiveMeshStateRefreshFailures = 0;
-			} else {
+			} else if (reason.includes('periodic platform refresh')) {
 				this.consecutiveMeshStateRefreshFailures += 1;
 				this.log.warn(
-					'[Cync TCP] Mesh-state refresh received no valid response (%s); consecutiveFailures=%d',
+					'[Cync TCP] Periodic mesh-state health check received no valid response (%s); consecutiveFailures=%d',
 					reason,
 					this.consecutiveMeshStateRefreshFailures,
 				);
@@ -652,6 +652,11 @@ export class TcpClient {
 					this.consecutiveMeshStateRefreshFailures = 0;
 					this.socket.destroy();
 				}
+			} else {
+				this.log.debug(
+					'[Cync TCP] Mesh-state reconciliation received no valid response (%s); connection health unchanged.',
+					reason,
+				);
 			}
 		} catch (err) {
 			this.log.debug('[Cync TCP] Mesh-state refresh failed (%s): %s', reason, String(err));

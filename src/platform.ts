@@ -711,7 +711,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		this.offlineTimeoutMs = (
 			Number.isFinite(configuredTimeoutSeconds) && configuredTimeoutSeconds >= 30
 				? configuredTimeoutSeconds
-				: 180
+				: 600
 		) * 1000;
 
 		// Canonical config keys: username, password, twoFactor

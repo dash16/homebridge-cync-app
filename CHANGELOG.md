@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Extended the Cync color-temperature mapping to the full observed white-preset range so HomeKit's warmest setting can reach **Sunset** and **Candle Light**, rather than stopping at **Warm White**.
+- Increased the default unreachable timeout from three to ten minutes so quiet devices are not marked unavailable between five-minute mesh refreshes.
+- Limited automatic reconnect failure counting to periodic mesh health checks, preventing unsuccessful startup or post-command reconciliation requests from tearing down an otherwise responsive connection.
+
 ## v0.7.2
 
 **Release Date:** 2026-07-26

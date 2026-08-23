@@ -899,14 +899,15 @@ export class TcpClient {
 				.map(([candidateControllerId]) => candidateControllerId)
 				.filter((candidateControllerId) => candidateControllerId > 0);
 
-			if (controllers.length === 1) {
+			if (controllers.length > 0) {
 				const fallbackControllerId = controllers[0];
 
 				this.log.debug(
-					'[Cync TCP] inferred controller for device=%s from topology: home=%s controller=0x%s',
+					'[Cync TCP] inferred initial controller for device=%s from topology: home=%s controller=0x%s candidates=%d',
 					deviceId,
 					homeId,
 					fallbackControllerId.toString(16).padStart(8, '0'),
+					controllers.length,
 				);
 
 				return fallbackControllerId;

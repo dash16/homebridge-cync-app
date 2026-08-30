@@ -19,8 +19,36 @@ function delay(ms: number): Promise<void> {
 }
 
 const POWER_ON_BRIGHTNESS_RESTORE_DELAY_MS = 500;
+const LIGHT_COMMAND_COALESCE_MS = 120;
+const LAN_APPEARANCE_HOLD_MS = 2000;
 const ctMinMired = 153;
 const ctMaxMired = 500;
+
+interface PendingLightWrites {
+	on?: boolean;
+	brightness?: number;
+	hue?: number;
+	saturation?: number;
+	mired?: number;
+	colorTouched: boolean;
+	satTouched: boolean;
+	ctTouched: boolean;
+	brightnessTouched: boolean;
+	restoreBrightness?: number;
+}
+
+function emptyPendingWrites(): PendingLightWrites {
+	return {
+		colorTouched: false,
+		satTouched: false,
+		ctTouched: false,
+		brightnessTouched: false,
+	};
+}
+
+function markLocalAppearanceWrite(cyncMeta: NonNullable<CyncAccessoryContext['cync']>): void {
+	cyncMeta.ignoreLanAppearanceUntil = Date.now() + LAN_APPEARANCE_HOLD_MS;
+}
 
 async function restoreBrightnessAfterPowerOn(
 	env: CyncAccessoryEnv,
@@ -46,6 +74,7 @@ async function restoreBrightnessAfterPowerOn(
 			cyncMeta.deviceId,
 		);
 
+		markLocalAppearanceWrite(cyncMeta);
 		await env.tcpClient.setColorTemperature(
 			cyncMeta.deviceId,
 			{
@@ -65,6 +94,7 @@ async function restoreBrightnessAfterPowerOn(
 			cyncMeta.deviceId,
 		);
 
+		markLocalAppearanceWrite(cyncMeta);
 		await env.tcpClient.setBrightness(
 			cyncMeta.deviceId,
 			brightness,
@@ -160,7 +190,247 @@ export function configureCyncLightAccessory(
 	env.startPollingDevice(deviceId);
 
 	const Characteristic = env.api.hap.Characteristic;
-	let pendingPowerOnRestore: { brightness: number; commandId: number } | undefined;
+	let pendingWrites = emptyPendingWrites();
+	let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
+	let coalesceWaiters: {
+		resolve: () => void;
+		reject: (reason?: unknown) => void;
+	}[] = [];
+
+	const failWrite = (action: string, err: unknown): never => {
+		env.log.warn(
+			'Cync: Light %s failed for %s (deviceId=%s): %s',
+			action,
+			deviceName,
+			ctx.cync?.deviceId ?? deviceId,
+			(err as Error).message ?? String(err),
+		);
+
+		throw new env.api.hap.HapStatusError(
+			env.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+		);
+	};
+
+	const resolveBrightness = (
+		cyncMeta: NonNullable<CyncAccessoryContext['cync']>,
+		pending: PendingLightWrites,
+	): number => {
+		if (typeof pending.brightness === 'number') {
+			return pending.brightness;
+		}
+		if (typeof cyncMeta.brightness === 'number') {
+			return cyncMeta.brightness;
+		}
+		return 100;
+	};
+
+	const applyOptimisticColor = (
+		cyncMeta: NonNullable<CyncAccessoryContext['cync']>,
+		hue: number,
+		saturation: number,
+		brightness: number,
+	): { r: number; g: number; b: number } => {
+		const rgb = hsvToRgb(hue, saturation, brightness);
+		cyncMeta.hue = hue;
+		cyncMeta.saturation = saturation;
+		cyncMeta.rgb = rgb;
+		cyncMeta.colorActive = true;
+		cyncMeta.on = brightness > 0;
+		cyncMeta.brightness = brightness;
+		if (brightness > 0) {
+			cyncMeta.lastNonZeroBrightness = brightness;
+		}
+		return rgb;
+	};
+
+	const flushPendingWrites = async (): Promise<void> => {
+		const cyncMeta = ctx.cync;
+		const pending = pendingWrites;
+		pendingWrites = emptyPendingWrites();
+
+		if (!cyncMeta?.deviceId) {
+			return;
+		}
+
+		if (pending.on === false) {
+			await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on: false });
+			env.clearActiveShowsForDevice?.(cyncMeta.deviceId);
+			env.markDeviceSeen(cyncMeta.deviceId);
+			return;
+		}
+
+		if (pending.colorTouched) {
+			const hue = typeof pending.hue === 'number' ? pending.hue : (cyncMeta.hue ?? 0);
+			let saturation = pending.satTouched
+				? (pending.saturation ?? 0)
+				: (typeof cyncMeta.saturation === 'number' ? cyncMeta.saturation : 100);
+			if (!pending.satTouched && saturation === 0) {
+				// HomeKit often writes Hue first while leftover CT mode still has sat=0.
+				// Treat that as "enter color mode" rather than sending white RGB.
+				saturation = 100;
+			}
+			const brightness = resolveBrightness(cyncMeta, pending);
+			const rgb = applyOptimisticColor(cyncMeta, hue, saturation, brightness);
+
+			env.log.info(
+				'Cync: Light flush color -> hue=%d sat=%d rgb=(%d,%d,%d) brightness=%d for %s (deviceId=%s)',
+				hue,
+				saturation,
+				rgb.r,
+				rgb.g,
+				rgb.b,
+				brightness,
+				deviceName,
+				cyncMeta.deviceId,
+			);
+
+			markLocalAppearanceWrite(cyncMeta);
+			await env.tcpClient.setColor(
+				cyncMeta.deviceId,
+				rgb,
+				brightness,
+				cyncMeta.deviceType,
+			);
+			env.markDeviceSeen(cyncMeta.deviceId);
+			return;
+		}
+
+		if (pending.ctTouched && typeof pending.mired === 'number') {
+			const brightness = resolveBrightness(cyncMeta, pending);
+
+			env.log.info(
+				'Cync: Light flush CT -> %d mired (~%dK) brightness=%d for %s (deviceId=%s)',
+				pending.mired,
+				miredToKelvin(pending.mired),
+				brightness,
+				deviceName,
+				cyncMeta.deviceId,
+			);
+
+			markLocalAppearanceWrite(cyncMeta);
+			await env.tcpClient.setColorTemperature(
+				cyncMeta.deviceId,
+				{
+					mired: pending.mired,
+					brightnessPct: brightness,
+					ctMinMired,
+					ctMaxMired,
+					invertTone: true,
+				},
+				cyncMeta.deviceType,
+			);
+			env.markDeviceSeen(cyncMeta.deviceId);
+			return;
+		}
+
+		if (pending.brightnessTouched && typeof pending.brightness === 'number') {
+			const brightness = pending.brightness;
+			const isCtMode =
+				!cyncMeta.colorActive && typeof cyncMeta.colorTemperature === 'number';
+
+			if (isCtMode) {
+				const colorTemperature = cyncMeta.colorTemperature;
+				if (typeof colorTemperature !== 'number') {
+					env.log.warn(
+						'Cync: Brightness.set CT mode for %s but no cached color temperature is available',
+						deviceName,
+					);
+					return;
+				}
+
+				env.log.debug(
+					'Cync: Light flush brightness preserving CT mode (mired=%d brightness=%d)',
+					colorTemperature,
+					brightness,
+				);
+
+				markLocalAppearanceWrite(cyncMeta);
+				await env.tcpClient.setColorTemperature(
+					cyncMeta.deviceId,
+					{
+						mired: colorTemperature,
+						brightnessPct: brightness,
+						ctMinMired,
+						ctMaxMired,
+						invertTone: true,
+					},
+					cyncMeta.deviceType,
+				);
+			} else {
+				env.log.debug(
+					'Cync: Light flush brightness preserving RGB state (colorActive=%s rgb=%o)',
+					String(!!cyncMeta.colorActive),
+					cyncMeta.rgb,
+				);
+
+				markLocalAppearanceWrite(cyncMeta);
+				await env.tcpClient.setBrightness(
+					cyncMeta.deviceId,
+					brightness,
+					cyncMeta.deviceType,
+					{
+						colorActive: cyncMeta.colorActive,
+						rgb: cyncMeta.rgb,
+					},
+				);
+			}
+
+			env.markDeviceSeen(cyncMeta.deviceId);
+			return;
+		}
+
+		if (pending.on === true) {
+			const powerCommandId = cyncMeta.powerCommandId ?? 0;
+			const restoreBrightness = pending.restoreBrightness;
+
+			await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on: true });
+			env.markDeviceSeen(cyncMeta.deviceId);
+
+			if (
+				(apkProfile?.supportsBrightness ?? true) &&
+				typeof restoreBrightness === 'number' &&
+				restoreBrightness > 0 &&
+				restoreBrightness < 100
+			) {
+				await delay(POWER_ON_BRIGHTNESS_RESTORE_DELAY_MS);
+				if (cyncMeta.powerCommandId === powerCommandId && cyncMeta.on === true) {
+					await restoreBrightnessAfterPowerOn(
+						env,
+						cyncMeta,
+						deviceName,
+						restoreBrightness,
+					);
+				}
+			}
+		}
+	};
+
+	const queueLightWrite = (): Promise<void> => {
+		if (coalesceTimer) {
+			clearTimeout(coalesceTimer);
+		}
+
+		return new Promise<void>((resolve, reject) => {
+			coalesceWaiters.push({ resolve, reject });
+			coalesceTimer = setTimeout(() => {
+				coalesceTimer = undefined;
+				const waiters = coalesceWaiters;
+				coalesceWaiters = [];
+				void flushPendingWrites().then(
+					() => {
+						for (const waiter of waiters) {
+							waiter.resolve();
+						}
+					},
+					(err: unknown) => {
+						for (const waiter of waiters) {
+							waiter.reject(err);
+						}
+					},
+				);
+			}, LIGHT_COMMAND_COALESCE_MS);
+		});
+	};
 
 	// ----- On/Off -----
 	service
@@ -217,64 +487,25 @@ export function configureCyncLightAccessory(
 				cyncMeta.lastNonZeroBrightness = restoreBrightness;
 			}
 
-			// Optimistic local cache; LAN update will confirm
 			cyncMeta.on = on;
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
-			const powerCommandId = cyncMeta.powerCommandId;
-			pendingPowerOnRestore =
+			pendingWrites.on = on;
+			if (
 				on &&
-				(apkProfile?.supportsBrightness ?? true) &&
+				!pendingWrites.brightnessTouched &&
 				typeof restoreBrightness === 'number' &&
 				restoreBrightness > 0 &&
 				restoreBrightness < 100
-					? { brightness: restoreBrightness, commandId: powerCommandId }
-					: undefined;
+			) {
+				pendingWrites.restoreBrightness = restoreBrightness;
+			} else {
+				pendingWrites.restoreBrightness = undefined;
+			}
 
 			try {
-				await env.tcpClient.setSwitchState(cyncMeta.deviceId, { on });
-				if (!on) {
-					env.clearActiveShowsForDevice?.(cyncMeta.deviceId);
-				}
-
-				if (
-					on &&
-					typeof restoreBrightness === 'number' &&
-					restoreBrightness > 0 &&
-					restoreBrightness < 100
-				) {
-					await delay(POWER_ON_BRIGHTNESS_RESTORE_DELAY_MS);
-					if (
-						pendingPowerOnRestore?.commandId === powerCommandId &&
-						cyncMeta.powerCommandId === powerCommandId &&
-						cyncMeta.on === true
-					) {
-						await restoreBrightnessAfterPowerOn(
-							env,
-							cyncMeta,
-							deviceName,
-							restoreBrightness,
-						);
-					}
-					if (pendingPowerOnRestore?.commandId === powerCommandId) {
-						pendingPowerOnRestore = undefined;
-					}
-				}
-
-				env.markDeviceSeen(cyncMeta.deviceId);
+				await queueLightWrite();
 			} catch (err) {
-				if (pendingPowerOnRestore?.commandId === powerCommandId) {
-					pendingPowerOnRestore = undefined;
-				}
-				env.log.warn(
-					'Cync: Light On.set failed for %s (deviceId=%s): %s',
-					deviceName,
-					cyncMeta.deviceId,
-					(err as Error).message ?? String(err),
-				);
-
-				throw new env.api.hap.HapStatusError(
-					env.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-				);
+				failWrite('On.set', err);
 			}
 		});
 
@@ -329,31 +560,32 @@ export function configureCyncLightAccessory(
 
 			if (
 				brightness === 100 &&
-				pendingPowerOnRestore &&
-				pendingPowerOnRestore.brightness < 100
+				typeof pendingWrites.restoreBrightness === 'number' &&
+				pendingWrites.restoreBrightness < 100 &&
+				!pendingWrites.brightnessTouched
 			) {
 				env.log.debug(
 					'Cync: Light Brightness.set suppressing companion 100%% while restoring %d for %s (deviceId=%s)',
-					pendingPowerOnRestore.brightness,
+					pendingWrites.restoreBrightness,
 					deviceName,
 					cyncMeta.deviceId,
 				);
 				service.updateCharacteristic(
 					Characteristic.Brightness,
-					pendingPowerOnRestore.brightness,
+					pendingWrites.restoreBrightness,
 				);
 				return;
 			}
 
-			pendingPowerOnRestore = undefined;
-
-			// Optimistic cache
 			cyncMeta.brightness = brightness;
 			cyncMeta.on = brightness > 0;
 			if (brightness > 0) {
 				cyncMeta.lastNonZeroBrightness = brightness;
 			}
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
+			pendingWrites.brightness = brightness;
+			pendingWrites.brightnessTouched = true;
+			pendingWrites.restoreBrightness = undefined;
 
 			env.log.info(
 				'Cync: Light Brightness.set -> %d for %s (deviceId=%s)',
@@ -363,70 +595,9 @@ export function configureCyncLightAccessory(
 			);
 
 			try {
-				const isCtMode =
-					!cyncMeta.colorActive && typeof cyncMeta.colorTemperature === 'number';
-
-				if (isCtMode) {
-					env.log.debug(
-						'Cync: Brightness.set preserving CT mode (mired=%d brightness=%d)',
-						cyncMeta.colorTemperature,
-						brightness,
-					);
-
-					const colorTemperature = cyncMeta.colorTemperature;
-
-					if (typeof colorTemperature !== 'number') {
-						env.log.warn(
-							'Cync: Brightness.set CT mode for %s but no cached color temperature is available',
-							deviceName,
-						);
-						return;
-					}
-
-					const ctMinMired = 153;
-					const ctMaxMired = 500;
-
-					await env.tcpClient.setColorTemperature(
-						cyncMeta.deviceId,
-						{
-							mired: colorTemperature,
-							brightnessPct: brightness,
-							ctMinMired,
-							ctMaxMired,
-							invertTone: true,
-						},
-						cyncMeta.deviceType,
-					);
-				} else {
-					env.log.debug(
-						'Cync: Brightness.set preserving RGB state (colorActive=%s rgb=%o)',
-						String(!!cyncMeta.colorActive),
-						cyncMeta.rgb,
-					);
-
-					await env.tcpClient.setBrightness(
-						cyncMeta.deviceId,
-						brightness,
-						cyncMeta.deviceType,
-						{
-							colorActive: cyncMeta.colorActive,
-							rgb: cyncMeta.rgb,
-						},
-					);
-				}
-
-				env.markDeviceSeen(cyncMeta.deviceId);
+				await queueLightWrite();
 			} catch (err) {
-				env.log.warn(
-					'Cync: Light Brightness.set failed for %s (deviceId=%s): %s',
-					deviceName,
-					cyncMeta.deviceId,
-					(err as Error).message ?? String(err),
-				);
-
-				throw new env.api.hap.HapStatusError(
-					env.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-				);
+				failWrite('Brightness.set', err);
 			}
 		});
 	// ----- Hue -----
@@ -468,57 +639,25 @@ export function configureCyncLightAccessory(
 				return;
 			}
 
-			// Use cached saturation/brightness if available, otherwise sane defaults
-			const saturation =
-        typeof cyncMeta.saturation === 'number' ? cyncMeta.saturation : 100;
-
-			const brightness =
-        typeof cyncMeta.brightness === 'number' ? cyncMeta.brightness : 100;
-
-			const rgb = hsvToRgb(hue, saturation, brightness);
-
-			// Optimistic cache
 			cyncMeta.hue = hue;
-			cyncMeta.saturation = saturation;
-			cyncMeta.rgb = rgb;
 			cyncMeta.colorActive = true;
-			cyncMeta.on = brightness > 0;
-			cyncMeta.brightness = brightness;
-			if (brightness > 0) {
-				cyncMeta.lastNonZeroBrightness = brightness;
-			}
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
+			pendingWrites.hue = hue;
+			pendingWrites.colorTouched = true;
+			pendingWrites.ctTouched = false;
+			pendingWrites.restoreBrightness = undefined;
 
 			env.log.info(
-				'Cync: Light Hue.set -> %d for %s (deviceId=%s) -> rgb=(%d,%d,%d) brightness=%d',
+				'Cync: Light Hue.set -> %d for %s (deviceId=%s)',
 				hue,
 				deviceName,
 				cyncMeta.deviceId,
-				rgb.r,
-				rgb.g,
-				rgb.b,
-				brightness,
 			);
 
 			try {
-				await env.tcpClient.setColor(
-					cyncMeta.deviceId,
-					cyncMeta.rgb,
-					brightness,
-					cyncMeta.deviceType,
-				);
-				env.markDeviceSeen(cyncMeta.deviceId);
+				await queueLightWrite();
 			} catch (err) {
-				env.log.warn(
-					'Cync: Light Hue.set failed for %s (deviceId=%s): %s',
-					deviceName,
-					cyncMeta.deviceId,
-					(err as Error).message ?? String(err),
-				);
-
-				throw new env.api.hap.HapStatusError(
-					env.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-				);
+				failWrite('Hue.set', err);
 			}
 		});
 
@@ -572,23 +711,43 @@ export function configureCyncLightAccessory(
 			}
 
 			const kelvin = miredToKelvin(mired);
+			const brightness =
+				typeof pendingWrites.brightness === 'number'
+					? pendingWrites.brightness
+					: typeof cyncMeta.brightness === 'number'
+						? cyncMeta.brightness
+						: 100;
 
-			// Treat CT as "white mode" (not RGB color mode)
+			if (pendingWrites.colorTouched) {
+				env.log.debug(
+					'Cync: Light ColorTemperature.set ignored companion CT %d mired after color write for %s (deviceId=%s)',
+					mired,
+					deviceName,
+					cyncMeta.deviceId,
+				);
+				cyncMeta.colorTemperature = mired;
+				try {
+					await queueLightWrite();
+				} catch (err) {
+					failWrite('ColorTemperature.set', err);
+				}
+				return;
+			}
+
 			cyncMeta.colorTemperature = mired;
 			cyncMeta.colorActive = false;
 			cyncMeta.hue = 0;
 			cyncMeta.saturation = 0;
 			cyncMeta.rgb = { r: 255, g: 255, b: 255 };
-
-			const brightness =
-				typeof cyncMeta.brightness === 'number' ? cyncMeta.brightness : 100;
-
 			cyncMeta.on = brightness > 0;
 			cyncMeta.brightness = brightness;
 			if (brightness > 0) {
 				cyncMeta.lastNonZeroBrightness = brightness;
 			}
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
+			pendingWrites.mired = mired;
+			pendingWrites.ctTouched = true;
+			pendingWrites.restoreBrightness = undefined;
 
 			env.log.info(
 				'Cync: Light ColorTemperature.set -> %d mired (~%dK) for %s (deviceId=%s) brightness=%d',
@@ -600,31 +759,9 @@ export function configureCyncLightAccessory(
 			);
 
 			try {
-				await env.tcpClient.setColorTemperature(
-					cyncMeta.deviceId,
-					{
-						mired,
-						brightnessPct: brightness,
-						ctMinMired,
-						ctMaxMired,
-
-						invertTone: true,
-					},
-					cyncMeta.deviceType,
-				);
-
-				env.markDeviceSeen(cyncMeta.deviceId);
+				await queueLightWrite();
 			} catch (err) {
-				env.log.warn(
-					'Cync: Light ColorTemperature.set failed for %s (deviceId=%s): %s',
-					deviceName,
-					cyncMeta.deviceId,
-					(err as Error).message ?? String(err),
-				);
-
-				throw new env.api.hap.HapStatusError(
-					env.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-				);
+				failWrite('ColorTemperature.set', err);
 			}
 		});
 
@@ -667,55 +804,26 @@ export function configureCyncLightAccessory(
 				return;
 			}
 
-			const hue = typeof cyncMeta.hue === 'number' ? cyncMeta.hue : 0;
-
-			const brightness =
-        typeof cyncMeta.brightness === 'number' ? cyncMeta.brightness : 100;
-
-			const rgb = hsvToRgb(hue, saturation, brightness);
-
-			// Optimistic cache
-			cyncMeta.hue = hue;
 			cyncMeta.saturation = saturation;
-			cyncMeta.rgb = rgb;
 			cyncMeta.colorActive = true;
-			cyncMeta.on = brightness > 0;
-			cyncMeta.brightness = brightness;
-			if (brightness > 0) {
-				cyncMeta.lastNonZeroBrightness = brightness;
-			}
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
+			pendingWrites.saturation = saturation;
+			pendingWrites.satTouched = true;
+			pendingWrites.colorTouched = true;
+			pendingWrites.ctTouched = false;
+			pendingWrites.restoreBrightness = undefined;
 
 			env.log.info(
-				'Cync: Light Saturation.set -> %d for %s (deviceId=%s) -> rgb=(%d,%d,%d) brightness=%d',
+				'Cync: Light Saturation.set -> %d for %s (deviceId=%s)',
 				saturation,
 				deviceName,
 				cyncMeta.deviceId,
-				rgb.r,
-				rgb.g,
-				rgb.b,
-				brightness,
 			);
 
 			try {
-				await env.tcpClient.setColor(
-					cyncMeta.deviceId,
-					rgb,
-					brightness,
-					cyncMeta.deviceType,
-				);
-				env.markDeviceSeen(cyncMeta.deviceId);
+				await queueLightWrite();
 			} catch (err) {
-				env.log.warn(
-					'Cync: Light Saturation.set failed for %s (deviceId=%s): %s',
-					deviceName,
-					cyncMeta.deviceId,
-					(err as Error).message ?? String(err),
-				);
-
-				throw new env.api.hap.HapStatusError(
-					env.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-				);
+				failWrite('Saturation.set', err);
 			}
 		});
 

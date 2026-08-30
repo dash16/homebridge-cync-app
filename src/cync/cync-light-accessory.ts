@@ -191,6 +191,7 @@ export function configureCyncLightAccessory(
 
 	const Characteristic = env.api.hap.Characteristic;
 	let pendingWrites = emptyPendingWrites();
+	let pendingPowerOnRestore: { brightness: number; commandId: number } | undefined;
 	let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
 	let coalesceWaiters: {
 		resolve: () => void;
@@ -393,13 +394,20 @@ export function configureCyncLightAccessory(
 				restoreBrightness < 100
 			) {
 				await delay(POWER_ON_BRIGHTNESS_RESTORE_DELAY_MS);
-				if (cyncMeta.powerCommandId === powerCommandId && cyncMeta.on === true) {
+				if (
+					pendingPowerOnRestore?.commandId === powerCommandId &&
+					cyncMeta.powerCommandId === powerCommandId &&
+					cyncMeta.on === true
+				) {
 					await restoreBrightnessAfterPowerOn(
 						env,
 						cyncMeta,
 						deviceName,
 						restoreBrightness,
 					);
+				}
+				if (pendingPowerOnRestore?.commandId === powerCommandId) {
+					pendingPowerOnRestore = undefined;
 				}
 			}
 		}
@@ -489,6 +497,7 @@ export function configureCyncLightAccessory(
 
 			cyncMeta.on = on;
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
+			const powerCommandId = cyncMeta.powerCommandId;
 			pendingWrites.on = on;
 			if (
 				on &&
@@ -498,8 +507,10 @@ export function configureCyncLightAccessory(
 				restoreBrightness < 100
 			) {
 				pendingWrites.restoreBrightness = restoreBrightness;
+				pendingPowerOnRestore = { brightness: restoreBrightness, commandId: powerCommandId };
 			} else {
 				pendingWrites.restoreBrightness = undefined;
+				pendingPowerOnRestore = undefined;
 			}
 
 			try {
@@ -560,19 +571,19 @@ export function configureCyncLightAccessory(
 
 			if (
 				brightness === 100 &&
-				typeof pendingWrites.restoreBrightness === 'number' &&
-				pendingWrites.restoreBrightness < 100 &&
+				pendingPowerOnRestore &&
+				pendingPowerOnRestore.brightness < 100 &&
 				!pendingWrites.brightnessTouched
 			) {
 				env.log.debug(
 					'Cync: Light Brightness.set suppressing companion 100%% while restoring %d for %s (deviceId=%s)',
-					pendingWrites.restoreBrightness,
+					pendingPowerOnRestore.brightness,
 					deviceName,
 					cyncMeta.deviceId,
 				);
 				service.updateCharacteristic(
 					Characteristic.Brightness,
-					pendingWrites.restoreBrightness,
+					pendingPowerOnRestore.brightness,
 				);
 				return;
 			}
@@ -586,6 +597,7 @@ export function configureCyncLightAccessory(
 			pendingWrites.brightness = brightness;
 			pendingWrites.brightnessTouched = true;
 			pendingWrites.restoreBrightness = undefined;
+			pendingPowerOnRestore = undefined;
 
 			env.log.info(
 				'Cync: Light Brightness.set -> %d for %s (deviceId=%s)',
@@ -640,12 +652,29 @@ export function configureCyncLightAccessory(
 			}
 
 			cyncMeta.hue = hue;
-			cyncMeta.colorActive = true;
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
 			pendingWrites.hue = hue;
+			pendingWrites.restoreBrightness = undefined;
+			pendingPowerOnRestore = undefined;
+
+			if (pendingWrites.ctTouched && !pendingWrites.satTouched) {
+				env.log.debug(
+					'Cync: Light Hue.set ignored companion hue=%d after CT write for %s (deviceId=%s)',
+					hue,
+					deviceName,
+					cyncMeta.deviceId,
+				);
+				try {
+					await queueLightWrite();
+				} catch (err) {
+					failWrite('Hue.set', err);
+				}
+				return;
+			}
+
+			cyncMeta.colorActive = true;
 			pendingWrites.colorTouched = true;
 			pendingWrites.ctTouched = false;
-			pendingWrites.restoreBrightness = undefined;
 
 			env.log.info(
 				'Cync: Light Hue.set -> %d for %s (deviceId=%s)',
@@ -748,6 +777,7 @@ export function configureCyncLightAccessory(
 			pendingWrites.mired = mired;
 			pendingWrites.ctTouched = true;
 			pendingWrites.restoreBrightness = undefined;
+			pendingPowerOnRestore = undefined;
 
 			env.log.info(
 				'Cync: Light ColorTemperature.set -> %d mired (~%dK) for %s (deviceId=%s) brightness=%d',
@@ -805,13 +835,29 @@ export function configureCyncLightAccessory(
 			}
 
 			cyncMeta.saturation = saturation;
-			cyncMeta.colorActive = true;
 			cyncMeta.powerCommandId = (cyncMeta.powerCommandId ?? 0) + 1;
 			pendingWrites.saturation = saturation;
 			pendingWrites.satTouched = true;
+			pendingWrites.restoreBrightness = undefined;
+			pendingPowerOnRestore = undefined;
+
+			if (pendingWrites.ctTouched && saturation === 0) {
+				env.log.debug(
+					'Cync: Light Saturation.set ignored companion sat=0 after CT write for %s (deviceId=%s)',
+					deviceName,
+					cyncMeta.deviceId,
+				);
+				try {
+					await queueLightWrite();
+				} catch (err) {
+					failWrite('Saturation.set', err);
+				}
+				return;
+			}
+
+			cyncMeta.colorActive = true;
 			pendingWrites.colorTouched = true;
 			pendingWrites.ctTouched = false;
-			pendingWrites.restoreBrightness = undefined;
 
 			env.log.info(
 				'Cync: Light Saturation.set -> %d for %s (deviceId=%s)',

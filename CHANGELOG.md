@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Fixed
-- Coalesced HomeKit Hue, Saturation, Brightness, and On writes so color lights no longer flash white from a leftover saturation of 0, then snap back when a later brightness restore or stale LAN echo overwrites the intended color.
+- Coalesced HomeKit Hue, Saturation, Brightness, and On writes so color lights no longer flash white from a leftover saturation of 0, then snap back when a later brightness restore or stale LAN echo overwrites the intended color. Companion Brightness=100 after power-on and companion Hue/Saturation writes after a color-temperature change are still ignored so paddle dimmers and tunable-white mode keep their previous behavior.
 - Extended the Cync color-temperature mapping to the full observed white-preset range so HomeKit's warmest setting can reach **Sunset** and **Candle Light**, rather than stopping at **Warm White**.
 - Increased the default unreachable timeout from three to ten minutes so quiet devices are not marked unavailable between five-minute mesh refreshes.
 - Limited automatic reconnect failure counting to periodic mesh health checks, preventing unsuccessful startup or post-command reconciliation requests from tearing down an otherwise responsive connection.

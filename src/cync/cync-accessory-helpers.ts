@@ -57,6 +57,7 @@ export interface CyncAccessoryContext {
 		saturation?: number; // 0-100
 		rgb?: { r: number; g: number; b: number };
 		colorActive?: boolean; // true if we last set RGB color
+		ignoreLanAppearanceUntil?: number; // epoch ms; skip stale LAN RGB/CT/brightness echoes
 
 		// Tunable-white state
 		colorTemperature?: number; // mireds (e.g. ~153-500)

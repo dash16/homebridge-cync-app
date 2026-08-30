@@ -584,8 +584,21 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			}
 		}
 
+		const ignoreStaleAppearance =
+			lightService &&
+			typeof ctx.cync.ignoreLanAppearanceUntil === 'number' &&
+			Date.now() < ctx.cync.ignoreLanAppearanceUntil;
+
+		if (ignoreStaleAppearance) {
+			this.log.debug(
+				'Cync: ignoring stale LAN appearance update for %s (deviceId=%s) until local color/brightness write settles',
+				accessory.displayName,
+				update.deviceId,
+			);
+		}
+
 		// ----- Brightness -----
-		if (lightService) {
+		if (lightService && !ignoreStaleAppearance) {
 			let brightnessPct: number | undefined;
 			let lastNonZeroBrightnessPct: number | undefined;
 
@@ -634,7 +647,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			}
 		}
 		// ----- Color (Hue/Sat) -----
-		if (lightService && update.rgb) {
+		if (lightService && !ignoreStaleAppearance && update.rgb) {
 			const hsv = rgbToHsv(update.rgb.r, update.rgb.g, update.rgb.b);
 
 			// Cache (optional, but helps keep internal state consistent)
@@ -664,6 +677,7 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		// ----- Color Temperature -----
 		if (
 			lightService &&
+			!ignoreStaleAppearance &&
 			typeof update.colorTemperatureMired === 'number' &&
 			Number.isFinite(update.colorTemperatureMired)
 		) {

@@ -63,6 +63,19 @@
 	</div>
 </div>
 
+<div class="card mb-3"><div class="card-body">
+	<h5 class="card-title">Unreachable Accessories</h5>
+	<label for="cyncUnreachablePolicy">When state becomes stale</label>
+	<select id="cyncUnreachablePolicy" class="form-control mb-3">
+		<option value="no-response">Show No Response</option>
+		<option value="cached">Keep Cached State</option>
+		<option value="assume-off">Assume Off</option>
+	</select>
+	<label for="cyncUnreachableTimeout">Timeout (seconds, 30–3600)</label>
+	<input id="cyncUnreachableTimeout" type="number" min="30" max="3600" step="1" class="form-control">
+	<p class="text-muted mt-2">Cached state may be out of date. Changing this setting does not restore connectivity.</p>
+</div></div>
+
 <script>
 homebridge.addEventListener('ready', async () => {
 	const emailInput = document.getElementById('cyncEmail');
@@ -283,6 +296,17 @@ homebridge.addEventListener('ready', async () => {
 		requestOtpBtn.disabled = locked;
 		// Sign Out remains enabled so the user can clear things
 	}
+
+	const policyInput = document.getElementById('cyncUnreachablePolicy');
+	const timeoutInput = document.getElementById('cyncUnreachableTimeout');
+	policyInput.value = cfg.unreachableStatePolicy || 'no-response';
+	timeoutInput.value = cfg.unreachableTimeoutSeconds || 600;
+	policyInput.addEventListener('change', () => updateConfig({ unreachableStatePolicy: policyInput.value }));
+	timeoutInput.addEventListener('change', () => {
+		if (timeoutInput.value && timeoutInput.reportValidity()) {
+			void updateConfig({ unreachableTimeoutSeconds: Number(timeoutInput.value) });
+		}
+	});
 
 	// Load from config.json into UI
 	emailInput.value = cfg.username || '';

@@ -28,6 +28,7 @@ const CYNC_CT_WARM_TONE = 1;
 const CYNC_CT_COOL_TONE = 100;
 const ROUTINE_SOCKET_WRITE_LABELS = new Set([
 	'heartbeat',
+	'status acknowledgement',
 	'controller ping',
 	'mesh-state request',
 ]);
@@ -109,6 +110,7 @@ export class TcpClient {
 			pending.resolve(false);
 		}
 		this.pendingMeshStateResponses.clear();
+		this.controllerLastResponse.clear();
 		this.seq = 0;
 		this.readBuffer = Buffer.alloc(0);
 
@@ -125,6 +127,7 @@ export class TcpClient {
 		}
 		this.controllerToDevice.set(controllerId, deviceId);
 	}
+	private readonly controllerLastResponse = new Map<number, number>();
 	private preferredControllerByDevice = new Map<string, number>();
 	private commandChain: Promise<void> = Promise.resolve();
 	private homeDevices: Record<string, string[]> = {};
@@ -395,7 +398,7 @@ export class TcpClient {
 			return null;
 		}
 
-		if (frame[9] !== 0x10) {
+		if (frame[4] !== 1 || frame[5] !== 1 || frame[6] !== 6) {
 			return null;
 		}
 
@@ -860,6 +863,7 @@ export class TcpClient {
 			.filter((controllerId) => controllerId > 0);
 
 		const ordered = [
+			...controllers.filter(id => Date.now() - (this.controllerLastResponse.get(id) ?? 0) < 600_000),
 			preferred,
 			primaryControllerId > 0 ? primaryControllerId : undefined,
 			...controllers,
@@ -1332,7 +1336,8 @@ export class TcpClient {
 		for (const homeId of homes) {
 			const controllers = [...this.switchIdToHomeId.entries()]
 				.filter(([, candidateHomeId]) => candidateHomeId === homeId)
-				.map(([controllerId]) => controllerId);
+				.map(([controllerId]) => controllerId)
+				.sort((a, b) => (this.controllerLastResponse.get(b) ?? 0) - (this.controllerLastResponse.get(a) ?? 0));
 
 			for (const controllerId of controllers) {
 				if (!isCurrentSocket()) {
@@ -1687,7 +1692,8 @@ export class TcpClient {
 	//   [0]=deviceIndex, [8]=isOn, [12]=brightness(0-100),
 	//   [16]=colorTone (0xfe means RGB mode), [20..22]=R,G,B
 	private parsePaginatedStateResponse(frame: Buffer): void {
-		if (frame.length < 51 || frame[13] !== 0x52) {
+		if (frame.length < 48 || frame[13] !== 0x52) {
+			this.logUnparsedFrame(0x73, frame, 'short mesh response');
 			return;
 		}
 
@@ -1702,7 +1708,7 @@ export class TcpClient {
 			return;
 		}
 
-		this.resolveMeshStateResponse(homeId);
+		let decodedRecords = 0;
 
 		const recordsStart = 22;
 		// Trailing checksum (1 byte) + frame terminator (0x7e) sit after the records,
@@ -1716,8 +1722,10 @@ export class TcpClient {
 
 			const deviceId = deviceIndex < devices.length ? devices[deviceIndex] : undefined;
 			if (!deviceId) {
+				this.log.debug('[Cync TCP] Skipping unmapped mesh index=%d controller=%d', deviceIndex, controllerId);
 				continue;
 			}
+			decodedRecords += 1;
 
 			const brightnessPct = on ? clampNumber(levelByte, 1, 100) : 0;
 			const lastNonZeroBrightnessPct =
@@ -1749,6 +1757,11 @@ export class TcpClient {
 				colorTemperatureMired,
 			});
 			this.confirmPendingPowerCommand(deviceId, on, 'mesh state');
+		}
+		if (decodedRecords > 0) {
+			this.resolveMeshStateResponse(homeId);
+		} else {
+			this.logUnparsedFrame(0x73, frame, 'mesh response contained no mapped records');
 		}
 	}
 
@@ -2263,6 +2276,20 @@ export class TcpClient {
 			}
 		}
 
+		// HA acknowledges incoming status even when its inner payload is unsupported.
+		// Preserve the server's controller and sequence; never allocate a command sequence.
+		if (type === 0x73 && frame.length >= 7) {
+			this.writeSocket(Buffer.concat([
+				Buffer.from('7300000007', 'hex'), frame.subarray(0, 6), Buffer.from([0]),
+			]), 'status acknowledgement');
+		}
+		if ((type === 0xab || type === 0x73 || type === 0x83) && frame.length >= 7) {
+			const controllerId = frame.readUInt32BE(0);
+			if (this.switchIdToHomeId.has(controllerId)) {
+				this.controllerLastResponse.set(controllerId, Date.now());
+			}
+		}
+
 		let payload: unknown = frame;
 
 		// 0x73 or 0x83 with inner subtype 0x52 is a paginated mesh-state response
@@ -2279,12 +2306,18 @@ export class TcpClient {
 		}
 
 		if (type === 0x43) {
-			const compactParsed = this.parseCompactStateFrame43(frame);
-			if (compactParsed) {
-				payload = compactParsed;
-				this.emitLanDeviceUpdate(compactParsed);
-				this.confirmPendingPowerCommand(compactParsed.deviceId, compactParsed.on, 'compact LAN update');
-			} else {
+			let decoded = 0;
+			for (let offset = 7; offset + 19 <= frame.length; offset += 19) {
+				const recordFrame = Buffer.concat([frame.subarray(0, 7), frame.subarray(offset, offset + 19)]);
+				const update = this.parseCompactStateFrame43(recordFrame);
+				if (update) {
+					decoded += 1;
+					payload = update;
+					this.emitLanDeviceUpdate(update);
+					this.confirmPendingPowerCommand(update.deviceId, update.on, 'compact LAN update');
+				}
+			}
+			if (decoded === 0) {
 				this.logUnparsedFrame(type, frame, 'compact event/status frame');
 			}
 		}

@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Fixed
+- Acknowledge incoming cloud status packets using the Home Assistant reference format, decode every compact state record, and prefer controllers that recently responded. Unmapped mesh replies no longer count as successful reconciliation.
+- Expose unreachable-state policy and timeout in the custom settings UI.
+- Coalesced HomeKit On, Brightness, Hue, Saturation, and Color Temperature writes into one coherent light command so color changes do not briefly send white or get overwritten by a delayed power-on brightness restore.
 - Extended the Cync color-temperature mapping to the full observed white-preset range so HomeKit's warmest setting can reach **Sunset** and **Candle Light**, rather than stopping at **Warm White**.
 - Increased the default unreachable timeout from three to ten minutes so quiet devices are not marked unavailable between five-minute mesh refreshes.
 - Limited automatic reconnect failure counting to periodic mesh health checks, preventing unsuccessful startup or post-command reconciliation requests from tearing down an otherwise responsive connection.

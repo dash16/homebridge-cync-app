@@ -2262,6 +2262,27 @@ export class TcpClient {
 		}
 	}
 
+	private decodeInnerStatusFrame(frame: Buffer): Buffer | null {
+		if (frame[frame.length - 1] !== 0x7e) {
+			return null;
+		}
+		const decoded: number[] = [...frame.subarray(0, 8)];
+		for (let offset = 8; offset < frame.length - 1; offset += 1) {
+			const byte = frame[offset];
+			if (byte === 0x7d) {
+				const escaped = frame[++offset];
+				if (offset >= frame.length - 1 || (escaped !== 0x5d && escaped !== 0x5e)) {
+					return null;
+				}
+				decoded.push(escaped ^ 0x20);
+			} else {
+				decoded.push(byte);
+			}
+		}
+		decoded.push(0x7e);
+		return Buffer.from(decoded);
+	}
+
 	// Incoming Frame Handler: routes LAN messages to raw + parsed callbacks
 	private handleIncomingFrame(frame: Buffer, type: number): void {
 		// Fan out raw frame to higher layers (CyncClient) for debugging
@@ -2276,11 +2297,12 @@ export class TcpClient {
 			}
 		}
 
-		// HA acknowledges incoming status even when its inner payload is unsupported.
+		// Status responses use the response flag (0x78), as in the Homebridge reference.
+		// Sending 0x73 submits another request: beta logs show the server ACKing our ACK.
 		// Preserve the server's controller and sequence; never allocate a command sequence.
 		if (type === 0x73 && frame.length >= 7) {
 			this.writeSocket(Buffer.concat([
-				Buffer.from('7300000007', 'hex'), frame.subarray(0, 6), Buffer.from([0]),
+				Buffer.from('7800000007', 'hex'), frame.subarray(0, 6), Buffer.from([0]),
 			]), 'status acknowledgement');
 		}
 		if ((type === 0xab || type === 0x73 || type === 0x83) && frame.length >= 7) {
@@ -2288,6 +2310,17 @@ export class TcpClient {
 			if (this.switchIdToHomeId.has(controllerId)) {
 				this.controllerLastResponse.set(controllerId, Date.now());
 			}
+		}
+
+		// The outer controller/sequence is not escaped. Only decode bytes between
+		// the inner 0x7e delimiters, before any subtype or record offset is read.
+		if ((type === 0x73 || type === 0x83) && frame.length > 8 && frame[7] === 0x7e) {
+			const decoded = this.decodeInnerStatusFrame(frame);
+			if (!decoded) {
+				this.logUnparsedFrame(type, frame, 'malformed escaped status payload');
+				return;
+			}
+			frame = decoded;
 		}
 
 		let payload: unknown = frame;

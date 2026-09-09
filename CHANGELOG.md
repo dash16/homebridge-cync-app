@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Fixed
+- Decode escaped inner status payloads before reading device offsets. Five-device mesh replies can escape their length byte, previously shifting every record and leaving all lights stale.
+- Send incoming status acknowledgements with the response flag (`0x78`); beta.0 sent `0x73`, which the server acknowledged as another request.
 - Acknowledge incoming cloud status packets using the Home Assistant reference format, decode every compact state record, and prefer controllers that recently responded. Unmapped mesh replies no longer count as successful reconciliation.
 - Expose unreachable-state policy and timeout in the custom settings UI.
 - Coalesced HomeKit On, Brightness, Hue, Saturation, and Color Temperature writes into one coherent light command so color changes do not briefly send white or get overwritten by a delayed power-on brightness restore.

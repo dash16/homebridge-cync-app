@@ -2,6 +2,8 @@
 
 ## 0.7.5-beta.8 — scene command consolidation
 
+- Restore custom configuration controls for unreachable timeout and state policy; polling frequency remains unchanged.
+
 - Combine light power, brightness and color/temperature requests arriving within a fixed 50 ms window into one command per light.
 - Preserve explicit OFF and zero brightness, standalone power handling, and the existing TCP send pacing.
 - The Issue 41 scene replay now sends five commands over 1.2 simulated seconds instead of fifteen over 4.2 seconds.

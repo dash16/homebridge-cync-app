@@ -51,6 +51,27 @@
 
 <div class="card mb-3">
 	<div class="card-body">
+		<h5 class="card-title">Unreachable Accessories</h5>
+		<div class="mb-3">
+			<label for="cyncUnreachablePolicy" class="form-label">Unreachable accessory state</label>
+			<select id="cyncUnreachablePolicy" class="form-control">
+				<option value="no-response">Show No Response (default)</option>
+				<option value="assume-off">Assume Off</option>
+				<option value="cached">Keep Cached State</option>
+			</select>
+			<p class="text-muted">Assume Off can show OFF during a network outage. Keep Cached State can show an outdated state.</p>
+		</div>
+		<div class="mb-3">
+			<label for="cyncUnreachableTimeout" class="form-label">Unreachable timeout (seconds)</label>
+			<input id="cyncUnreachableTimeout" type="number" min="30" max="3600" step="1" class="form-control">
+			<p class="text-muted">Time since the last device update before it is considered unreachable. Default: 600 seconds.
+				This does not change the five-minute polling interval. Click Save and restart the child bridge to apply changes.</p>
+		</div>
+	</div>
+</div>
+
+<div class="card mb-3">
+	<div class="card-body">
 		<div class="d-flex justify-content-between align-items-center gap-2">
 			<h5 class="card-title mb-0">Shows by Device</h5>
 			<button id="cyncRefreshDevicesBtn" class="btn btn-sm btn-outline-secondary">Refresh Devices</button>
@@ -65,6 +86,8 @@
 
 <script>
 homebridge.addEventListener('ready', async () => {
+	const unreachablePolicyInput = document.getElementById('cyncUnreachablePolicy');
+	const unreachableTimeoutInput = document.getElementById('cyncUnreachableTimeout');
 	const emailInput = document.getElementById('cyncEmail');
 	const passwordInput = document.getElementById('cyncPassword');
 	const otpInput = document.getElementById('cyncOtp');
@@ -288,6 +311,22 @@ homebridge.addEventListener('ready', async () => {
 	emailInput.value = cfg.username || '';
 	passwordInput.value = cfg.password || '';
 	otpInput.value = cfg.twoFactor || '';
+
+	unreachablePolicyInput.value = ['no-response', 'assume-off', 'cached'].includes(cfg.unreachableStatePolicy)
+		? cfg.unreachableStatePolicy : 'no-response';
+	const configuredTimeout = Number(cfg.unreachableTimeoutSeconds);
+	unreachableTimeoutInput.value = Number.isFinite(configuredTimeout) && configuredTimeout >= 30 ? configuredTimeout : 600;
+	unreachablePolicyInput.addEventListener('change', async () => {
+		await updateConfig({ unreachableStatePolicy: unreachablePolicyInput.value });
+	});
+	unreachableTimeoutInput.addEventListener('change', async () => {
+		if (!unreachableTimeoutInput.value || !unreachableTimeoutInput.checkValidity()) {
+			unreachableTimeoutInput.reportValidity();
+			homebridge.toast.warning('Enter a whole number from 30 to 3600 seconds.', 'Invalid Timeout');
+			return;
+		}
+		await updateConfig({ unreachableTimeoutSeconds: Number(unreachableTimeoutInput.value) });
+	});
 
 	// Check token status and lock fields if a token exists
 	try {

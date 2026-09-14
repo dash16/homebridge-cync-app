@@ -28,7 +28,6 @@ const CYNC_CT_WARM_TONE = 1;
 const CYNC_CT_COOL_TONE = 100;
 const ROUTINE_SOCKET_WRITE_LABELS = new Set([
 	'heartbeat',
-	'status acknowledgement',
 	'controller ping',
 	'mesh-state request',
 ]);
@@ -110,7 +109,6 @@ export class TcpClient {
 			pending.resolve(false);
 		}
 		this.pendingMeshStateResponses.clear();
-		this.controllerLastResponse.clear();
 		this.seq = 0;
 		this.readBuffer = Buffer.alloc(0);
 
@@ -127,7 +125,6 @@ export class TcpClient {
 		}
 		this.controllerToDevice.set(controllerId, deviceId);
 	}
-	private readonly controllerLastResponse = new Map<number, number>();
 	private preferredControllerByDevice = new Map<string, number>();
 	private commandChain: Promise<void> = Promise.resolve();
 	private homeDevices: Record<string, string[]> = {};
@@ -398,7 +395,7 @@ export class TcpClient {
 			return null;
 		}
 
-		if (frame[4] !== 1 || frame[5] !== 1 || frame[6] !== 6) {
+		if (frame[9] !== 0x10) {
 			return null;
 		}
 
@@ -863,7 +860,6 @@ export class TcpClient {
 			.filter((controllerId) => controllerId > 0);
 
 		const ordered = [
-			...controllers.filter(id => Date.now() - (this.controllerLastResponse.get(id) ?? 0) < 600_000),
 			preferred,
 			primaryControllerId > 0 ? primaryControllerId : undefined,
 			...controllers,
@@ -983,10 +979,11 @@ export class TcpClient {
 
 					this.pendingPowerCommands.delete(pendingKey);
 
-					this.log.warn(
-						'[Cync TCP] %s state not confirmed within %dms: device=%s expectedOn=%s controller=0x%s seq=%d',
-						logLabel,
+					this.log.debug(
+						'[Cync TCP] No matching ON/OFF report within %dms after %s send; physical result unknown (not a command failure): '
+						+ 'device=%s expectedOn=%s controller=0x%s seq=%d',
 						POWER_STATE_CONFIRM_TIMEOUT_MS,
+						logLabel,
 						deviceId,
 						String(expectedOn),
 						candidateControllerId.toString(16).padStart(8, '0'),
@@ -1024,7 +1021,7 @@ export class TcpClient {
 				this.preferredControllerByDevice.set(deviceId, candidateControllerId);
 
 				this.log.debug(
-					'[Cync TCP] %s command transport accepted; awaiting state confirmation: device=%s controller=0x%s',
+					'[Cync TCP] %s sent without immediate transport rejection; awaiting optional ON/OFF feedback: device=%s controller=0x%s',
 					logLabel,
 					deviceId,
 					candidateControllerId.toString(16).padStart(8, '0'),
@@ -1336,8 +1333,7 @@ export class TcpClient {
 		for (const homeId of homes) {
 			const controllers = [...this.switchIdToHomeId.entries()]
 				.filter(([, candidateHomeId]) => candidateHomeId === homeId)
-				.map(([controllerId]) => controllerId)
-				.sort((a, b) => (this.controllerLastResponse.get(b) ?? 0) - (this.controllerLastResponse.get(a) ?? 0));
+				.map(([controllerId]) => controllerId);
 
 			for (const controllerId of controllers) {
 				if (!isCurrentSocket()) {
@@ -1692,8 +1688,7 @@ export class TcpClient {
 	//   [0]=deviceIndex, [8]=isOn, [12]=brightness(0-100),
 	//   [16]=colorTone (0xfe means RGB mode), [20..22]=R,G,B
 	private parsePaginatedStateResponse(frame: Buffer): void {
-		if (frame.length < 48 || frame[13] !== 0x52) {
-			this.logUnparsedFrame(0x73, frame, 'short mesh response');
+		if (frame.length < 51 || frame[13] !== 0x52) {
 			return;
 		}
 
@@ -1708,7 +1703,7 @@ export class TcpClient {
 			return;
 		}
 
-		let decodedRecords = 0;
+		this.resolveMeshStateResponse(homeId);
 
 		const recordsStart = 22;
 		// Trailing checksum (1 byte) + frame terminator (0x7e) sit after the records,
@@ -1722,10 +1717,8 @@ export class TcpClient {
 
 			const deviceId = deviceIndex < devices.length ? devices[deviceIndex] : undefined;
 			if (!deviceId) {
-				this.log.debug('[Cync TCP] Skipping unmapped mesh index=%d controller=%d', deviceIndex, controllerId);
 				continue;
 			}
-			decodedRecords += 1;
 
 			const brightnessPct = on ? clampNumber(levelByte, 1, 100) : 0;
 			const lastNonZeroBrightnessPct =
@@ -1757,11 +1750,6 @@ export class TcpClient {
 				colorTemperatureMired,
 			});
 			this.confirmPendingPowerCommand(deviceId, on, 'mesh state');
-		}
-		if (decodedRecords > 0) {
-			this.resolveMeshStateResponse(homeId);
-		} else {
-			this.logUnparsedFrame(0x73, frame, 'mesh response contained no mapped records');
 		}
 	}
 
@@ -2262,29 +2250,23 @@ export class TcpClient {
 		}
 	}
 
-	private decodeInnerStatusFrame(frame: Buffer): Buffer | null {
-		if (frame[frame.length - 1] !== 0x7e) {
-			return null;
-		}
-		const decoded: number[] = [...frame.subarray(0, 8)];
-		for (let offset = 8; offset < frame.length - 1; offset += 1) {
-			const byte = frame[offset];
-			if (byte === 0x7d) {
-				const escaped = frame[++offset];
-				if (offset >= frame.length - 1 || (escaped !== 0x5d && escaped !== 0x5e)) {
-					return null;
-				}
-				decoded.push(escaped ^ 0x20);
-			} else {
-				decoded.push(byte);
-			}
-		}
-		decoded.push(0x7e);
-		return Buffer.from(decoded);
-	}
-
 	// Incoming Frame Handler: routes LAN messages to raw + parsed callbacks
 	private handleIncomingFrame(frame: Buffer, type: number): void {
+		// Decode only the inner frame; controller and outer sequence are literal.
+		// Cync escapes 0x7e as 0x7d 0x5e, including the five-record length byte.
+		if ((type === 0x73 || type === 0x83) && frame.length >= 9 && frame[7] === 0x7e && frame[frame.length - 1] === 0x7e) {
+			const bytes = [...frame.subarray(0, 8)];
+			for (let i = 8; i < frame.length - 1; i++) {
+				if (frame[i] === 0x7d && i + 1 < frame.length - 1 && frame[i + 1] === 0x5e) {
+					bytes.push(0x7e);
+					i++;
+				} else {
+					bytes.push(frame[i]);
+				}
+			}
+			frame = Buffer.from([...bytes, 0x7e]);
+		}
+
 		// Fan out raw frame to higher layers (CyncClient) for debugging
 		for (const listener of this.rawFrameListeners) {
 			try {
@@ -2295,32 +2277,6 @@ export class TcpClient {
 					String(err),
 				);
 			}
-		}
-
-		// Status responses use the response flag (0x78), as in the Homebridge reference.
-		// Sending 0x73 submits another request: beta logs show the server ACKing our ACK.
-		// Preserve the server's controller and sequence; never allocate a command sequence.
-		if (type === 0x73 && frame.length >= 7) {
-			this.writeSocket(Buffer.concat([
-				Buffer.from('7800000007', 'hex'), frame.subarray(0, 6), Buffer.from([0]),
-			]), 'status acknowledgement');
-		}
-		if ((type === 0xab || type === 0x73 || type === 0x83) && frame.length >= 7) {
-			const controllerId = frame.readUInt32BE(0);
-			if (this.switchIdToHomeId.has(controllerId)) {
-				this.controllerLastResponse.set(controllerId, Date.now());
-			}
-		}
-
-		// The outer controller/sequence is not escaped. Only decode bytes between
-		// the inner 0x7e delimiters, before any subtype or record offset is read.
-		if ((type === 0x73 || type === 0x83) && frame.length > 8 && frame[7] === 0x7e) {
-			const decoded = this.decodeInnerStatusFrame(frame);
-			if (!decoded) {
-				this.logUnparsedFrame(type, frame, 'malformed escaped status payload');
-				return;
-			}
-			frame = decoded;
 		}
 
 		let payload: unknown = frame;
@@ -2339,18 +2295,12 @@ export class TcpClient {
 		}
 
 		if (type === 0x43) {
-			let decoded = 0;
-			for (let offset = 7; offset + 19 <= frame.length; offset += 19) {
-				const recordFrame = Buffer.concat([frame.subarray(0, 7), frame.subarray(offset, offset + 19)]);
-				const update = this.parseCompactStateFrame43(recordFrame);
-				if (update) {
-					decoded += 1;
-					payload = update;
-					this.emitLanDeviceUpdate(update);
-					this.confirmPendingPowerCommand(update.deviceId, update.on, 'compact LAN update');
-				}
-			}
-			if (decoded === 0) {
+			const compactParsed = this.parseCompactStateFrame43(frame);
+			if (compactParsed) {
+				payload = compactParsed;
+				this.emitLanDeviceUpdate(compactParsed);
+				this.confirmPendingPowerCommand(compactParsed.deviceId, compactParsed.on, 'compact LAN update');
+			} else {
 				this.logUnparsedFrame(type, frame, 'compact event/status frame');
 			}
 		}

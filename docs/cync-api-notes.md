@@ -1,3 +1,5 @@
+> Historical design/reference notes: interfaces and upstream observations below are not a verified specification of the current plugin. See [current beta notes](issue-41-rebuild.md) and `src/cync/` for implementation behavior.
+
 # **docs/cync-api-notes.md**
 
 ## **Cync Cloud API Notes**
@@ -268,15 +270,8 @@ The upstream integration returns the following final structure:
 
 This dataset defines the full set of controllable Cync devices and establishes the mesh addressing required for TCP commands.
 
-### **TCP LAN Control (Not yet implemented)**
+### TCP control in the current plugin
 
-Cync cloud discovery provides:
-
-- product_id
-- access_key
-- meshId
-
-These values will be used to establish a LAN session using:
-
-  `/tcp-client.connect(loginCode, config)`
-
+TCP control is implemented in `src/cync/tcp-client.ts`. It connects over TLS to
+Cync cloud services; references to LAN packets describe relayed device/mesh
+payloads, not a direct local connection from Homebridge to the light.

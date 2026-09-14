@@ -16,7 +16,23 @@
 
 Homebridge plugin for integrating GE Cync devices with Apple HomeKit.
 
-This plugin connects to your Cync account, discovers supported devices automatically, and exposes them to HomeKit through Homebridge. Where supported, communication is performed locally over LAN for improved responsiveness and reliability.
+This plugin connects to your Cync account, discovers supported devices automatically, and exposes them to HomeKit through Homebridge. Commands and state updates use a TLS connection to Cync cloud services, which relay device/mesh traffic; the plugin requires internet access.
+
+## Beta testing: 0.7.5-beta.8
+
+Beta.8 builds on the beta.7 rebuild from 0.7.4 and combines light power,
+brightness and color/temperature changes received within 50 ms into one command
+per light. The five-light Issue 41 replay sends five packets over 1.2 simulated
+seconds instead of fifteen over 4.2 seconds. Physical response times can differ.
+
+Known limitation: certain purple commands near 49–50% brightness did not take
+effect during local testing. Failed examples contain RGB byte `0x7D`; the cause
+remains unconfirmed. This beta does not fix that issue.
+
+For the current implementation, validation and linked-development instructions,
+see [beta notes](docs/issue-41-rebuild.md). The beta version is separate from the
+stable release; this document does not establish npm publication status.
+
 
 ---
 
@@ -31,9 +47,7 @@ This plugin connects to your Cync account, discovers supported devices automatic
 	- RGBIC Light Show support for compatible devices
 	- RGBIC Music Show support for compatible devices
 	- Optional HomeKit accessories for supported built-in shows
-- Local LAN control for supported devices
-	- Reduced cloud dependency
-	- Faster state updates and command execution
+- Cloud-relayed device control and state updates
 - Child bridge compatible
 - Homebridge UI configuration support
 - Debug logging support for troubleshooting

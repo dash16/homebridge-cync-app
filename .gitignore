@@ -143,3 +143,7 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Preserved diagnostic candidates and Python bytecode
+/artifacts/
+__pycache__/

@@ -2,7 +2,7 @@
 	"name": "homebridge-cync-app",
 	"displayName": "Homebridge Cync App",
 	"type": "module",
-	"version": "0.7.5-beta.0",
+	"version": "0.7.5-beta.8",
 	"private": false,
 	"description": "Homebridge plugin that integrates your GE Cync account (via the Cync app/API) and exposes all supported devices: plugs, lights, switches, etc",
 	"author": "Dustin Newell",
@@ -40,9 +40,10 @@
 	"scripts": {
 		"build": "rimraf ./dist && tsc",
 		"lint": "eslint . --max-warnings=0",
-		"test": "npm run build && node --test test/*.test.mjs",
 		"prepublishOnly": "npm run lint && npm run build",
-		"watch": "npm run build && npm link && nodemon"
+		"watch": "npm run build && npm link && nodemon",
+		"test": "npm run build && node --test test/*.test.mjs",
+		"test:issue41": "npm run build && node --test test/*.test.mjs"
 	},
 	"dependencies": {
 		"@homebridge/plugin-ui-utils": "^2.1.2"

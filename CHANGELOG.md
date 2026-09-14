@@ -1,13 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.7.5-beta.8 — scene command consolidation
+
+- Combine light power, brightness and color/temperature requests arriving within a fixed 50 ms window into one command per light.
+- Preserve explicit OFF and zero brightness, standalone power handling, and the existing TCP send pacing.
+- The Issue 41 scene replay now sends five commands over 1.2 simulated seconds instead of fifteen over 4.2 seconds.
+- Known limitation: some purple color commands near 49–50% brightness did not take effect in local hardware testing. Failed examples contain RGB byte 0x7D; the cause remains unconfirmed and is not fixed in this beta.
+
+## 0.7.5-beta.7 — rebuilt from 0.7.4
+
+- Restore the 0.7.4 transport, command completion, UI, and accessory handlers as the baseline.
+- Prevent a companion CT/color write from inheriting zero brightness immediately after ON; preserve subsequent explicit zero brightness.
+- Decode escaped inner status bytes so five-device mesh responses retain correct record offsets.
+- Report missing ON/OFF feedback at debug level without implying that a physically successful CT or other command failed.
+- Earlier beta experiments are excluded from this candidate and preserved locally for reference.
+
+
+## 0.7.4 baseline notes
 
 ### Fixed
-- Decode escaped inner status payloads before reading device offsets. Five-device mesh replies can escape their length byte, previously shifting every record and leaving all lights stale.
-- Send incoming status acknowledgements with the response flag (`0x78`); beta.0 sent `0x73`, which the server acknowledged as another request.
-- Acknowledge incoming cloud status packets using the Home Assistant reference format, decode every compact state record, and prefer controllers that recently responded. Unmapped mesh replies no longer count as successful reconciliation.
-- Expose unreachable-state policy and timeout in the custom settings UI.
-- Coalesced HomeKit On, Brightness, Hue, Saturation, and Color Temperature writes into one coherent light command so color changes do not briefly send white or get overwritten by a delayed power-on brightness restore.
 - Extended the Cync color-temperature mapping to the full observed white-preset range so HomeKit's warmest setting can reach **Sunset** and **Candle Light**, rather than stopping at **Warm White**.
 - Increased the default unreachable timeout from three to ten minutes so quiet devices are not marked unavailable between five-minute mesh refreshes.
 - Limited automatic reconnect failure counting to periodic mesh health checks, preventing unsuccessful startup or post-command reconciliation requests from tearing down an otherwise responsive connection.

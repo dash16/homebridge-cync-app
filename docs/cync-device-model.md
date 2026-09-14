@@ -1,3 +1,5 @@
+> Historical design/reference notes: interfaces and upstream observations below are not a verified specification of the current plugin. See [current beta notes](issue-41-rebuild.md) and `src/cync/` for implementation behavior.
+
 # **docs/cync-device-model.md**
 
 ## **Cync Device and Room Model**

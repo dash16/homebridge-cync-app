@@ -1,4 +1,7 @@
-# Issue 41: current beta.8 and beta.7 baseline
+# Issue 41: beta.8 and beta.7 development history
+
+These are historical beta notes. The tested light-control changes are included in
+[0.7.5](release-0.7.5.md), alongside token-renewal and startup-recovery fixes.
 
 ## Beta.8 candidate: scene consolidation
 

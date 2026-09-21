@@ -18,20 +18,18 @@ Homebridge plugin for integrating GE Cync devices with Apple HomeKit.
 
 This plugin connects to your Cync account, discovers supported devices automatically, and exposes them to HomeKit through Homebridge. Commands and state updates use a TLS connection to Cync cloud services, which relay device/mesh traffic; the plugin requires internet access.
 
-## Beta testing: 0.7.5-beta.8
+## What's new in 0.7.5
 
-Beta.8 builds on the beta.7 rebuild from 0.7.4 and combines light power,
-brightness and color/temperature changes received within 50 ms into one command
-per light. The five-light Issue 41 replay sends five packets over 1.2 simulated
-seconds instead of fifteen over 4.2 seconds. Physical response times can differ.
+- Combine nearby light power, brightness, and color/temperature changes into one command per light, reducing redundant scene traffic.
+- Improve brightness restoration when turning lights on and decode escaped mesh status responses correctly.
+- Refresh Cync access tokens automatically at 85% of their returned lifetime, with a schedule that survives restarts and retries temporary failures.
+- Report cached accessories as unavailable while startup authentication is incomplete, and restore the unreachable-accessory controls in plugin settings.
 
-Known limitation: certain purple commands near 49–50% brightness did not take
-effect during local testing. Failed examples contain RGB byte `0x7D`; the cause
-remains unconfirmed. This beta does not fix that issue.
+Upgrade through Homebridge UI or run `npm install -g homebridge-cync-app@0.7.5`, then restart Homebridge to load both the plugin and its settings server. Existing valid sessions are retained; a fresh sign-in is only needed if Cync rejects the stored refresh token.
 
-For the current implementation, validation and linked-development instructions,
-see [beta notes](docs/issue-41-rebuild.md). The beta version is separate from the
-stable release; this document does not establish npm publication status.
+Known limitation: certain purple color commands near 49–50% brightness did not take effect during local testing. The cause remains unconfirmed; 0.7.5 does not resolve this issue.
+
+See the [release notes](docs/release-0.7.5.md) for details and validation limits. The [beta development notes](docs/issue-41-rebuild.md) are retained as historical context.
 
 
 ---
@@ -103,7 +101,13 @@ After installation:
 
 Devices should appear automatically after startup.
 
-Tokens are cached locally to reduce repeated login prompts.
+### Session renewal
+
+Tokens are stored locally. When Cync returns an access-token lifetime, the plugin schedules renewal at 85% of that lifetime—about six days for a seven-day token. Each successful renewal saves the replacement credentials and next refresh time. Restarts retain the schedule and refresh immediately if it is overdue. Older token files use their modification time as an approximate issuance time until the next successful renewal.
+
+Temporary startup failures retry after 30 seconds. Temporary scheduled-refresh failures use exponential backoff from 30 seconds to 30 minutes, preserving stored credentials. Token-file read/parse errors also remain retryable. Sign-out waits for an in-flight refresh before removing its saved result.
+
+The startup log reports `next token refresh scheduled for ...` in UTC. If Cync explicitly rejects a refresh token, sign out in plugin settings, request a fresh verification code, save the updated credentials/code, and restart Homebridge. Automatic renewal cannot prevent server-side session revocation.
 
 ### Shows by Device
 
@@ -131,13 +135,15 @@ If a Cync white preset maps to an unexpected HomeKit position, enable debug logg
 
 Certain Cync device types are exposed as outlets instead of generic switches to improve HomeKit behavior and Siri integration.
 
-### LAN Communication
+### Device Communication
 
-The plugin attempts to communicate with supported devices locally over the network for improved responsiveness compared to cloud-only control.
+Commands and device-state updates use Cync’s mesh protocol over a TLS connection to Cync cloud services. Internet access is required; “LAN” labels in debug logs describe the protocol and do not imply offline local control.
 
 ### Unreachable Accessories
 
 Smart bulbs cannot report an OFF state when a wall switch removes their power. By default, an accessory that has not reported state for ten minutes is therefore shown as **No Response** instead of continuing to display a stale ON state. This allows two scheduled five-minute mesh refresh opportunities before a quiet accessory is considered unreachable.
+
+During startup, cached controls report communication failure until authentication and accessory initialization complete. The timeout policy below applies after those controls have been initialized.
 
 This behavior can be adjusted in the plugin settings:
 

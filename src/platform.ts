@@ -130,7 +130,27 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 	public configureAccessory(accessory: PlatformAccessory): void {
 		this.log.info('Restoring cached accessory', accessory.displayName);
 		this.accessories.push(accessory);
+		// Cached HAP values survive restarts, but their handlers do not. Guard
+		// them immediately, even if authentication never reaches discovery.
+		const unavailable = () => {
+			throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+		};
+		for (const service of accessory.services) {
+			if (service.UUID === this.api.hap.Service.AccessoryInformation.UUID) {
+				continue;
+			}
+			for (const characteristic of service.characteristics) {
+				if (characteristic.props.perms.includes(this.api.hap.Perms.PAIRED_WRITE)) {
+					characteristic.onGet(unavailable).onSet(unavailable);
+					characteristic.updateValue(new this.api.hap.HapStatusError(
+						this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+					));
+				}
+			}
+		}
 	}
+	private startupRetryTimer: NodeJS.Timeout | null = null;
+	private shuttingDown = false;
 	private readonly log: Logger;
 	private readonly api: API;
 	private readonly config: PlatformConfig;
@@ -761,6 +781,12 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			void this.loadCync();
 		});
 		this.api.on('shutdown', () => {
+			this.shuttingDown = true;
+			this.client.stopTokenRefresh();
+			if (this.startupRetryTimer) {
+				clearTimeout(this.startupRetryTimer);
+				this.startupRetryTimer = null;
+			}
 			if (this.meshPollTimer) {
 				clearInterval(this.meshPollTimer);
 				this.meshPollTimer = null;
@@ -787,6 +813,18 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 		};
 	}
 
+	private scheduleStartupRetry(): void {
+		if (this.shuttingDown || this.startupRetryTimer) {
+			return;
+		}
+		this.log.warn('Cync: initialization temporarily failed; retrying in 30 seconds.');
+		this.startupRetryTimer = setTimeout(() => {
+			this.startupRetryTimer = null;
+			void this.loadCync();
+		}, 30_000);
+		this.startupRetryTimer.unref();
+	}
+
 	private async loadCync(): Promise<void> {
 		try {
 			const raw = this.config as Record<string, unknown>;
@@ -811,6 +849,9 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 			// Let CyncClient handle 2FA bootstrap + token persistence.
 			const loggedIn = await this.client.ensureLoggedIn();
 			if (!loggedIn) {
+				if (this.client.loginRetryNeeded) {
+					this.scheduleStartupRetry();
+				}
 				// We either just requested a 2FA code or hit a credential error.
 				// In the "code requested" case, the log already tells the user
 				// to add it to config and restart.
@@ -849,6 +890,11 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				);
 			}
 
+			if (this.shuttingDown) {
+				return;
+			}
+			// Discovery replaces guards for supported controls. Any cached
+			// accessory absent from discovery must remain unavailable.
 			this.discoverDevices(cloudConfig);
 
 		} catch (err) {
@@ -856,6 +902,10 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				'Cync: cloud login failed: %s',
 				(err as Error).message ?? String(err),
 			);
+			const status = (err as { status?: number })?.status;
+			if (status === undefined || status >= 500 || status === 429) {
+				this.scheduleStartupRetry();
+			}
 		}
 	}
 

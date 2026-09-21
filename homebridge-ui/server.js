@@ -1,7 +1,8 @@
 // homebridge-ui/server.js
 import { HomebridgePluginUiServer } from '@homebridge/plugin-ui-utils';
 import { ConfigClient } from '../dist/cync/config-client.js';
-import { CyncTokenStore } from '../dist/cync/token-store.js';
+import { format } from 'node:util';
+import { CyncTokenStore, isRefreshTokenRejected } from '../dist/cync/token-store.js';
 import { getCyncApkDeviceProfile } from '../dist/cync/device-capabilities.js';
 
 function asShowList(value, crcMap) {
@@ -24,10 +25,10 @@ class CyncUiServer extends HomebridgePluginUiServer {
 		super();
 
 		this.configClient = new ConfigClient({
-			debug: (...a) => console.debug('[cync-ui-config]', ...a),
-			info:  (...a) => console.info('[cync-ui-config]', ...a),
-			warn:  (...a) => console.warn('[cync-ui-config]', ...a),
-			error: (...a) => console.error('[cync-ui-config]', ...a),
+			debug: (...a) => console.debug('[cync-ui-config]', format(...a)),
+			info:  (...a) => console.info('[cync-ui-config]', format(...a)),
+			warn:  (...a) => console.warn('[cync-ui-config]', format(...a)),
+			error: (...a) => console.error('[cync-ui-config]', format(...a)),
 		});
 
 		this.tokenStore = new CyncTokenStore(this.homebridgeStoragePath);
@@ -66,12 +67,12 @@ class CyncUiServer extends HomebridgePluginUiServer {
 			return {
 				ok: true,
 				hasToken: true,
+				reauthenticationRequired: token.refreshRejected === true,
 				userId: token.userId,
 				expiresAt: token.expiresAt ?? null,
 			};
 		} catch {
-			// On error, just say "no token"
-			return { ok: true, hasToken: false };
+			return { ok: false, error: 'Unable to read the saved Cync session. Check storage access and retry.' };
 		}
 	}
 
@@ -82,18 +83,17 @@ class CyncUiServer extends HomebridgePluginUiServer {
 		}
 
 		if (
-			token.expiresAt &&
-			Date.now() >= token.expiresAt - 60_000 &&
-			token.refreshToken
+			token.refreshRejected ||
+			(token.expiresAt && Date.now() >= token.expiresAt - 60_000)
 		) {
-			const refreshed = await this.configClient.refreshAccessToken(token.refreshToken);
-			token = {
-				...token,
-				accessToken: refreshed.accessToken,
-				refreshToken: refreshed.refreshToken ?? token.refreshToken,
-				expiresAt: refreshed.expiresAt ?? token.expiresAt,
-			};
-			await this.tokenStore.save(token);
+			try {
+				token = await this.tokenStore.refresh(token, value => this.configClient.refreshAccessToken(value), false);
+			} catch (error) {
+				if (isRefreshTokenRejected(error)) {
+					throw new Error('Cync rejected the refresh token. Sign out, request a fresh 2FA code, enter it in the plugin settings, and restart Homebridge.');
+				}
+				throw error;
+			}
 		}
 
 		this.configClient.restoreSession(token.accessToken, token.userId);
@@ -157,7 +157,7 @@ class CyncUiServer extends HomebridgePluginUiServer {
 			return { ok: true, devices };
 		} catch (error) {
 			console.error('[cync-ui-config] Device discovery failed:', error);
-			return { ok: false, error: error?.message ?? String(error), devices: [] };
+			return { ok: false, error: error?.message ?? error?.msg ?? String(error), devices: [] };
 		}
 	}
 }

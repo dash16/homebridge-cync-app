@@ -482,6 +482,7 @@ export class ConfigClient {
 
 		const res = (await fetch(url, {
 			method: 'POST',
+			signal: AbortSignal.timeout(15_000),
 			headers: {
 				'Content-Type': 'application/json',
 				'Accept': 'application/json',
@@ -601,6 +602,7 @@ export class ConfigClient {
 
 		const res = (await fetch(devicesUrl, {
 			method: 'GET',
+			signal: AbortSignal.timeout(15_000),
 			headers: {
 				...headers,
 				'Accept': 'application/json',

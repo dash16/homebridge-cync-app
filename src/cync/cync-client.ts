@@ -6,7 +6,7 @@ import {
 	CyncLogger,
 } from './config-client.js';
 import { TcpClient } from './tcp-client.js';
-import { CyncTokenStore, CyncTokenData } from './token-store.js';
+import { CyncTokenStore, CyncTokenData, withTokenSchedule } from './token-store.js';
 
 type SessionWithPossibleTokens = {
 	accessToken?: string;
@@ -35,6 +35,82 @@ export class CyncClient {
 	private readonly unsupportedPropertiesProductIds = new Set<string>();
 	private readonly tokenStore: CyncTokenStore;
 	private tokenData: CyncTokenData | null = null;
+	public loginRetryNeeded = false;
+	private refreshTimer: NodeJS.Timeout | null = null;
+	private refreshRetryMs = 30_000;
+	private stopped = false;
+
+	public stopTokenRefresh(): void {
+		this.stopped = true;
+		if (this.refreshTimer) {
+			clearTimeout(this.refreshTimer);
+			this.refreshTimer = null;
+		}
+	}
+
+	private scheduleTokenRefresh(token: CyncTokenData): void {
+		if (this.refreshTimer) {
+			clearTimeout(this.refreshTimer);
+			this.refreshTimer = null;
+		}
+		this.refreshRetryMs = 30_000;
+		if (this.stopped || !token.refreshToken || token.refreshRejected || !Number.isFinite(token.refreshAt)) {
+			return;
+		}
+		this.log.info('Cync: next token refresh scheduled for %s (85%% of token lifetime).',
+			new Date(token.refreshAt!).toISOString());
+		this.armTokenRefresh(Math.max(0, token.refreshAt! - Date.now()));
+	}
+
+	private armTokenRefresh(delayMs: number): void {
+		if (this.refreshTimer) {
+			clearTimeout(this.refreshTimer);
+			this.refreshTimer = null;
+		}
+		if (this.stopped) {
+			return;
+		}
+		// Node timers overflow above ~24.8 days. Recheck the saved deadline
+		// when a capped timer fires rather than refreshing a long-lived token early.
+		this.refreshTimer = setTimeout(() => {
+			this.refreshTimer = null;
+			void this.runScheduledTokenRefresh();
+		}, Math.min(Math.max(1, delayMs), 2_147_483_647));
+		this.refreshTimer.unref();
+	}
+
+	private async runScheduledTokenRefresh(): Promise<void> {
+		if (this.stopped) {
+			return;
+		}
+		try {
+			// The UI or diagnostic may have refreshed since this timer was armed.
+			const current = await this.tokenStore.load();
+			if (this.stopped || !current) {
+				return;
+			}
+			if (!current.refreshRejected && Number.isFinite(current.refreshAt) && current.refreshAt! > Date.now()) {
+				this.tokenData = current;
+				this.applyAccessToken(current);
+				return;
+			}
+			this.log.info('Cync: scheduled token refresh starting.');
+			const result = await this.refreshAccessToken(current);
+			if (result.status === 'refreshed') {
+				return; // applyAccessToken has armed the new schedule.
+			}
+			if (result.status === 'rejected') {
+				this.log.error('Cync: scheduled refresh rejected. Sign out and sign in again with a fresh verification code.');
+				return;
+			}
+		} catch {
+			this.log.warn('Cync: scheduled token refresh could not complete.');
+		}
+		this.log.warn('Cync: retrying token refresh in %d seconds.', this.refreshRetryMs / 1000);
+		this.armTokenRefresh(this.refreshRetryMs);
+		this.refreshRetryMs = Math.min(this.refreshRetryMs * 2, 30 * 60_000);
+	}
+
 	private unwrapApiError(err: unknown): { status?: number; code?: number; msg?: string } {
 		if (!err || typeof err !== 'object') {
 			return {};
@@ -199,6 +275,7 @@ export class CyncClient {
 		 * Returns true on successful login, false if we need user input (2FA).
 		 */
 	public async ensureLoggedIn(): Promise<boolean> {
+		this.loginRetryNeeded = false;
 		// 1) Try stored token/session
 		const stored = await this.tokenStore.load();
 		if (stored) {
@@ -211,9 +288,10 @@ export class CyncClient {
 			this.tokenData = stored;
 
 			// If the token is expired / near-expiry, refresh it now.
-			if (this.isTokenExpiredOrStale(stored.expiresAt)) {
+			if (stored.refreshRejected || (stored.refreshAt !== undefined && Date.now() >= stored.refreshAt) ||
+				this.isTokenExpiredOrStale(stored.expiresAt)) {
 				this.log.warn(
-					'CyncClient: stored access token is expired or near expiry; refreshing before use.',
+					'CyncClient: stored access token is due for refresh; refreshing before use.',
 				);
 
 				const refreshResult = await this.refreshAccessToken(stored);
@@ -227,6 +305,7 @@ export class CyncClient {
 					this.tokenData = null;
 
 					if (refreshResult.status === 'failed') {
+						this.loginRetryNeeded = true;
 						return false;
 					}
 
@@ -292,14 +371,14 @@ export class CyncClient {
 			this.log.warn('CyncClient: login response missing "authorize"; LAN login will be disabled.');
 		}
 
-		const tokenData: CyncTokenData = {
+		const tokenData = withTokenSchedule({
 			userId: String(loginResult.userId),
 			accessToken: loginResult.accessToken,
 			refreshToken: loginResult.refreshToken,
 			expiresAt: loginResult.expiresAt ?? undefined,
 			authorize,
 			lanLoginCode,
-		};
+		});
 
 		await this.tokenStore.save(tokenData);
 		this.tokenData = tokenData;
@@ -367,6 +446,7 @@ export class CyncClient {
 
 		// Push into ConfigClient so cloud calls can use it.
 		this.configClient.restoreSession(tokenData.accessToken, tokenData.userId);
+		this.scheduleTokenRefresh(tokenData);
 
 		// Hydrate our own session snapshot so ensureSession() passes.
 		this.session = {
@@ -457,25 +537,11 @@ export class CyncClient {
 	private async refreshAccessToken(
 		stored: CyncTokenData,
 	): Promise<RefreshAccessTokenResult> {
-		if (!stored.refreshToken) {
-			this.log.warn(
-				'CyncClient: refreshAccessToken() called but no refreshToken is stored; reauth will be required.',
-			);
-			await this.tokenStore.clear();
-			return { status: 'rejected' };
-		}
 
 		try {
-			const resp = await this.configClient.refreshAccessToken(stored.refreshToken);
-
-			const next: CyncTokenData = {
-				...stored,
-				accessToken: resp.accessToken,
-				refreshToken: resp.refreshToken ?? stored.refreshToken,
-				expiresAt: resp.expiresAt ?? stored.expiresAt,
-			};
-
-			await this.tokenStore.save(next);
+			const next = await this.tokenStore.refresh(
+				stored, token => this.configClient.refreshAccessToken(token),
+			);
 			this.tokenData = next;
 			this.applyAccessToken(next);
 
@@ -493,7 +559,7 @@ export class CyncClient {
 				(apiError.status === 400 && apiError.msg === 'refresh token error');
 
 			if (refreshTokenRejected) {
-				await this.tokenStore.clear();
+				this.tokenData = null;
 				this.log.warn(
 					'CyncClient: Cync permanently rejected the refresh token (%s); cleared it from storage.',
 					this.formatApiError(err),
@@ -522,6 +588,9 @@ export class CyncClient {
 				const refreshResult = await this.refreshAccessToken(this.tokenData);
 				if (refreshResult.status === 'refreshed') {
 					return await this.configClient.getCloudConfig();
+				}
+				if (refreshResult.status === 'failed') {
+					throw new Error('Cync token refresh temporarily failed; retry initialization.');
 				}
 			}
 

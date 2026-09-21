@@ -331,9 +331,14 @@ homebridge.addEventListener('ready', async () => {
 	// Check token status and lock fields if a token exists
 	try {
 		const status = await homebridge.request('/status');
-		if (status && status.ok && status.hasToken) {
+		if (status && !status.ok) {
 			setLockedState(true);
-			statusEl.textContent = 'Signed in. Click Sign Out to change credentials.';
+			statusEl.textContent = status.error;
+		} else if (status && status.ok && status.hasToken) {
+			setLockedState(true);
+			statusEl.textContent = status.reauthenticationRequired
+				? 'Cync session expired. Click Sign Out, then request a new verification code.'
+				: 'Signed in. Click Sign Out to change credentials.';
 		}
 	} catch (e) {
 		console.error('[cync-ui] /status request failed:', e);

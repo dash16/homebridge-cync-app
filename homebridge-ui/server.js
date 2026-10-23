@@ -31,7 +31,9 @@ class CyncUiServer extends HomebridgePluginUiServer {
 			error: (...a) => console.error('[cync-ui-config]', format(...a)),
 		});
 
-		this.tokenStore = new CyncTokenStore(this.homebridgeStoragePath);
+		this.tokenStore = new CyncTokenStore(this.homebridgeStoragePath, 'ui');
+
+		void this.tokenStore.history.record('startup');
 
 		this.onRequest('/request-otp', this.handleRequestOtp.bind(this));
 		this.onRequest('/sign-out', this.handleSignOut.bind(this));

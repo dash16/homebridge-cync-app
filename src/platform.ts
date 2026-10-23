@@ -902,7 +902,13 @@ export class CyncAppPlatform implements DynamicPlatformPlugin {
 				'Cync: cloud login failed: %s',
 				(err as Error).message ?? String(err),
 			);
-			const status = (err as { status?: number })?.status;
+			const { status, code } = (err ?? {}) as { status?: number; code?: number };
+			if (code === 4001379) {
+				this.log.error(
+					'Cync: verification code rejected. Request a fresh code in plugin settings, replace twoFactor, save, and restart. '
+					+ 'Automatic login retries stopped.',
+				);
+			}
 			if (status === undefined || status >= 500 || status === 429) {
 				this.scheduleStartupRetry();
 			}

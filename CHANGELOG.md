@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.6-beta.1 — Persistent authentication diagnostics
+
+Add bounded, secret-free authentication history across plugin and UI processes, retained after sign-out and restart. Preserve real 2FA error codes to stop retrying rejected verification codes, and remove verification codes from constructor debug output. See [beta notes and collection instructions](docs/release-0.7.6-beta.1.md). The underlying intermittent session rejection is still under investigation.
+
 ## 0.7.5 — Scene control and session reliability
 
 This release brings the light-control improvements tested in the 0.7.5 betas to the stable channel and adds proactive token renewal and startup recovery. Scenes generate fewer redundant commands, and temporary authentication failures no longer leave the plugin waiting indefinitely for a restart.

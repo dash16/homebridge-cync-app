@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CyncTokenStore } from '../dist/cync/token-store.js';
+import { ConfigClient } from '../dist/cync/config-client.js';
 import { CyncClient } from '../dist/cync/cync-client.js';
 import { CyncAppPlatform } from '../dist/platform.js';
 
@@ -151,3 +152,26 @@ test('cloud startup failure retries, while a rejected login does not loop OTP at
 	await second.loadCync();
 	assert.equal(second.startupRetryTimer, null);
 });
+
+for (const status of [400, 429, 503]) {
+	test(`real login parser preserves HTTP ${status} for startup retry decisions`, async t => {
+		const { directory, store } = await storage(t);
+		await store.clear();
+		const { instance, events } = platform();
+		t.after(() => events.get('shutdown')());
+		instance.client = new CyncClient(new ConfigClient(log), {},
+			{ username: 'test', password: 'test', twoFactor: 'old-code' }, directory, log);
+		let requests = 0;
+		t.mock.method(globalThis, 'fetch', async () => {
+			requests++;
+			return new globalThis.Response(JSON.stringify({ error: {
+				code: status === 400 ? 4001379 : 5000000,
+				msg: status === 400 ? 'two factor verification code error' : 'temporarily unavailable',
+			} }), { status });
+		});
+		await instance.loadCync();
+		assert.equal(requests, 1);
+		assert.equal(instance.startupRetryTimer !== null, status !== 400);
+		assert.equal(await store.load(), null);
+	});
+}

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { AuthHistory } from './auth-history.js';
 import type { CyncRefreshResponse } from './config-client.js';
 
 export function isRefreshTokenRejected(error: unknown): boolean {
@@ -41,15 +42,31 @@ export function withTokenSchedule(data: CyncTokenData, issuedAt = Date.now()): C
  *   <storagePath>/homebridge-cync-app/cync-tokens.json
  */
 export class CyncTokenStore {
+	public readonly history: AuthHistory;
 	private readonly dirPath: string;
 	private readonly filePath: string;
 
-	public constructor(storagePath: string) {
+	public constructor(storagePath: string, source: 'plugin' | 'ui' | 'diagnostic' = 'diagnostic') {
 		this.dirPath = path.join(storagePath, 'homebridge-cync-app');
 		this.filePath = path.join(this.dirPath, 'cync-tokens.json');
+		this.history = new AuthHistory(this.dirPath, source);
 	}
 
 	public async load(): Promise<CyncTokenData | null> {
+		try {
+			const data = await this.loadFile();
+			await this.history.record(data ? 'load_ok' : 'load_missing', data ? {
+				expiresAt: data.expiresAt, issuedAt: data.issuedAt, refreshAt: data.refreshAt,
+				hasRefreshToken: !!data.refreshToken, refreshRejected: !!data.refreshRejected,
+			} : {});
+			return data;
+		} catch (error) {
+			await this.history.record('load_failed', error && typeof error === 'object' ? error : {});
+			throw error;
+		}
+	}
+
+	private async loadFile(): Promise<CyncTokenData | null> {
 		let file;
 		try {
 			file = await fs.open(this.filePath, 'r');
@@ -89,7 +106,12 @@ export class CyncTokenStore {
 	}
 
 	public async save(data: CyncTokenData): Promise<void> {
-		await this.withLock(() => this.saveUnlocked(data));
+		try {
+			await this.withLock(() => this.saveUnlocked(data));
+		} catch (error) {
+			await this.history.record('save_failed');
+			throw error;
+		}
 	}
 
 	private async saveUnlocked(data: CyncTokenData): Promise<void> {
@@ -101,6 +123,8 @@ export class CyncTokenStore {
 		try {
 			await fs.writeFile(temporaryPath, json, { encoding: 'utf8', mode: 0o600 });
 			await fs.rename(temporaryPath, this.filePath);
+			await this.history.record('save_ok', { expiresAt: data.expiresAt, refreshAt: data.refreshAt,
+				hasRefreshToken: !!data.refreshToken, refreshRejected: !!data.refreshRejected });
 		} finally {
 			await fs.unlink(temporaryPath).catch(() => {});
 		}
@@ -126,24 +150,35 @@ export class CyncTokenStore {
 				throw new Error('Sign in to Cync before loading devices.');
 			}
 			if (current.accessToken !== stored.accessToken || current.refreshToken !== stored.refreshToken) {
+				await this.history.record('session_adopted');
 				return current;
 			}
 			if (current.refreshRejected || !current.refreshToken) {
 				throw { code: 4001010, msg: 'Refresh token unavailable or rejected' };
 			}
+			await this.history.record('refresh_attempt', { expiresAt: current.expiresAt, refreshAt: current.refreshAt });
 			const response = await exchange(current.refreshToken);
+			await this.history.record('refresh_response', { accessChanged: response.accessToken !== current.accessToken,
+				refreshChanged: !!response.refreshToken && response.refreshToken !== current.refreshToken });
 			const next = withTokenSchedule({
 				...current,
 				accessToken: response.accessToken,
 				refreshToken: response.refreshToken ?? current.refreshToken,
 				expiresAt: response.expiresAt,
 			});
-			await this.saveUnlocked(next);
+			await this.saveUnlocked(next).catch(async error => {
+				await this.history.record('save_failed');
+				throw error;
+			});
+			await this.history.record('refresh_ok', { accessChanged: next.accessToken !== current.accessToken,
+				refreshChanged: next.refreshToken !== current.refreshToken, expiresAt: next.expiresAt, refreshAt: next.refreshAt });
 			return next;
 		} catch (error) {
+			await this.history.record(isRefreshTokenRejected(error) ? 'refresh_rejected' : 'refresh_failed',
+				error && typeof error === 'object' ? error : {});
 			if (isRefreshTokenRejected(error)) {
 				if (clearRejected) {
-					await this.clearUnlocked();
+					await this.clearUnlocked('delete_rejected');
 				} else {
 					const current = await this.load();
 					if (current) {
@@ -157,17 +192,19 @@ export class CyncTokenStore {
 
 	/** Sign-out waits for any active refresh to finish, then removes its result. */
 	public async clear(): Promise<void> {
-		await this.withLock(() => this.clearUnlocked());
+		await this.withLock(() => this.clearUnlocked('delete_signout'));
 	}
 
-	private async clearUnlocked(): Promise<void> {
+	private async clearUnlocked(reason: 'delete_signout' | 'delete_rejected'): Promise<void> {
 		try {
 			await fs.unlink(this.filePath);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+				await this.history.record('delete_failed');
 				throw error;
 			}
 		}
+		await this.history.record(reason);
 	}
 
 	/** All credential mutations use the same cross-process lock. */

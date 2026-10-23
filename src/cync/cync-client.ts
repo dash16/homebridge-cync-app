@@ -39,8 +39,10 @@ export class CyncClient {
 	private refreshTimer: NodeJS.Timeout | null = null;
 	private refreshRetryMs = 30_000;
 	private stopped = false;
+	private historyStarted = false;
 
 	public stopTokenRefresh(): void {
+		void this.tokenStore.history.record('stopped');
 		this.stopped = true;
 		if (this.refreshTimer) {
 			clearTimeout(this.refreshTimer);
@@ -55,8 +57,11 @@ export class CyncClient {
 		}
 		this.refreshRetryMs = 30_000;
 		if (this.stopped || !token.refreshToken || token.refreshRejected || !Number.isFinite(token.refreshAt)) {
+			void this.tokenStore.history.record('schedule_skipped', { hasRefreshToken: !!token.refreshToken,
+				refreshRejected: !!token.refreshRejected, refreshAt: token.refreshAt });
 			return;
 		}
+		void this.tokenStore.history.record('scheduled', { refreshAt: token.refreshAt, expiresAt: token.expiresAt });
 		this.log.info('Cync: next token refresh scheduled for %s (85%% of token lifetime).',
 			new Date(token.refreshAt!).toISOString());
 		this.armTokenRefresh(Math.max(0, token.refreshAt! - Date.now()));
@@ -80,6 +85,7 @@ export class CyncClient {
 	}
 
 	private async runScheduledTokenRefresh(): Promise<void> {
+		await this.tokenStore.history.record('timer_fired');
 		if (this.stopped) {
 			return;
 		}
@@ -106,6 +112,7 @@ export class CyncClient {
 		} catch {
 			this.log.warn('Cync: scheduled token refresh could not complete.');
 		}
+		await this.tokenStore.history.record('retry_scheduled', { delayMs: this.refreshRetryMs });
 		this.log.warn('Cync: retrying token refresh in %d seconds.', this.refreshRetryMs / 1000);
 		this.armTokenRefresh(this.refreshRetryMs);
 		this.refreshRetryMs = Math.min(this.refreshRetryMs * 2, 30 * 60_000);
@@ -244,7 +251,7 @@ export class CyncClient {
 		this.log = logger ?? defaultLogger;
 
 		this.loginConfig = loginConfig;
-		this.tokenStore = new CyncTokenStore(storagePath);
+		this.tokenStore = new CyncTokenStore(storagePath, 'plugin');
 
 		// One-time sanity log so we can see exactly what was passed in from platform/config.
 		this.log.debug(
@@ -252,7 +259,7 @@ export class CyncClient {
 			{
 				username: loginConfig.username,
 				hasPassword: !!loginConfig.password,
-				twoFactor: loginConfig.twoFactor,
+				hasTwoFactor: !!loginConfig.twoFactor,
 			},
 		);
 	}
@@ -276,6 +283,10 @@ export class CyncClient {
 		 */
 	public async ensureLoggedIn(): Promise<boolean> {
 		this.loginRetryNeeded = false;
+		if (!this.historyStarted) {
+			await this.tokenStore.history.record('startup');
+			this.historyStarted = true;
+		}
 		// 1) Try stored token/session
 		const stored = await this.tokenStore.load();
 		if (stored) {
@@ -357,7 +368,11 @@ export class CyncClient {
 
 		// We have a 2FA code – complete login and persist token
 		this.log.info('Cync: completing 2FA login for %s', username);
-		const loginResult = await this.completeTwoFactorLogin(username, password, trimmedCode);
+		await this.tokenStore.history.record('login_attempt');
+		const loginResult = await this.completeTwoFactorLogin(username, password, trimmedCode).catch(async error => {
+			await this.tokenStore.history.record('login_failed', error);
+			throw error;
+		});
 
 		const authorize = typeof (loginResult.raw as Record<string, unknown>)?.authorize === 'string'
 			? (loginResult.raw as Record<string, unknown>).authorize as string
@@ -381,6 +396,7 @@ export class CyncClient {
 		});
 
 		await this.tokenStore.save(tokenData);
+		await this.tokenStore.history.record('login_ok');
 		this.tokenData = tokenData;
 
 		this.applyAccessToken(tokenData);

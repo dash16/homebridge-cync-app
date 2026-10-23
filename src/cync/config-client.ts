@@ -240,11 +240,11 @@ export class ConfigClient {
 				res.statusText,
 				json,
 			);
-			const errBody = json as CyncErrorBody;
-			throw new Error(
-				errBody.error?.msg ??
-				`Cync login failed with status ${res.status} ${res.statusText}`,
-			);
+			const { code, msg } = extractCyncError(json);
+			const message = msg ?? `Cync login failed with status ${res.status} ${res.statusText}`;
+			// Keep HTTP/API metadata across the ConfigClient -> platform boundary.
+			// Without it, a rejected OTP looks like a retryable network error.
+			throw Object.assign(new Error(message), { status: res.status, code, msg: message });
 		}
 
 		const obj = json as Record<string, unknown>;

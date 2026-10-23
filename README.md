@@ -18,6 +18,10 @@ Homebridge plugin for integrating GE Cync devices with Apple HomeKit.
 
 This plugin connects to your Cync account, discovers supported devices automatically, and exposes them to HomeKit through Homebridge. Commands and state updates use a TLS connection to Cync cloud services, which relay device/mesh traffic; the plugin requires internet access.
 
+## Authentication diagnostics beta
+
+`0.7.6-beta.1` adds automatic persistent authentication history for investigating recurring sign-in failures. Stable remains `0.7.5`. See [installation and log collection instructions](docs/release-0.7.6-beta.1.md), including the Synology Homebridge package shared-folder location. This beta also stops retrying rejected 2FA codes; the original intermittent refresh rejection remains under investigation.
+
 ## What's new in 0.7.5
 
 - Combine nearby light power, brightness, and color/temperature changes into one command per light, reducing redundant scene traffic.

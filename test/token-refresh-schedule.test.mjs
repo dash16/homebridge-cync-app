@@ -22,6 +22,7 @@ function harness(t, lifetime = 7 * day) {
 	} };
 	const client = new CyncClient(config, {}, {}, '/unused', log);
 	client.tokenStore = {
+		history: { record: async () => {} },
 		load: async () => saved && { ...saved },
 		refresh: async (stored, exchange) => {
 			saved = withTokenSchedule({ ...stored, ...await exchange(stored.refreshToken) });

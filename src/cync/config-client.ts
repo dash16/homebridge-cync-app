@@ -318,18 +318,16 @@ export class ConfigClient {
 	}
 
 	/**
-	 * Password-only login for background refresh.
-	 *
-	 * This uses the /user_auth endpoint (no two_factor) and is intended
-	 * for automatic re-auth when the access token has expired, after an
-	 * initial 2FA bootstrap has already been completed.
+	 * Experimental password-only endpoint. Not called by production recovery.
+	 * Server acceptance after a 2FA bootstrap has not been established.
 	 */
 	public async loginWithPassword(
 		email: string,
 		password: string,
+		inspection?: RefreshInspectionOptions & { previousRefreshToken: string },
 	): Promise<CyncLoginSession & { refreshToken?: string; expiresAt?: number }> {
 		const url = `${CYNC_API_BASE}user_auth`;
-		this.log.debug('Logging into Cync with password-only auth for %s…', email);
+		this.log.debug('Attempting Cync password authentication.');
 
 		const body = {
 			corp_id: CORP_ID,
@@ -340,6 +338,7 @@ export class ConfigClient {
 
 		const res = (await fetch(url, {
 			method: 'POST',
+			signal: AbortSignal.timeout(15_000),
 			headers: {
 				'Content-Type': 'application/json',
 				'Accept': 'application/json',
@@ -348,40 +347,23 @@ export class ConfigClient {
 		})) as HttpResponse;
 
 		const parsed = await this.readBodyOnce(res);
-
-		if (parsed.text.trim().length === 0) {
-			const ct = parsed.contentType ?? 'unknown';
-			throw new Error(
-				`Cync password login returned empty body: HTTP ${res.status} ${res.statusText} (content-type=${ct})`,
-			);
+		if (inspection) {
+			emitInspection(inspection, inspectRefreshResponse(parsed.json, res.status, parsed.contentType,
+				inspection.previousAccessToken, inspection.previousRefreshToken, 'password'));
 		}
 
-		if (parsed.json === null) {
-			const ct = parsed.contentType ?? 'unknown';
-			const snippet = parsed.text.trim().slice(0, 300);
-			throw new Error(
-				`Cync password login returned non-JSON payload: HTTP ${res.status} ${res.statusText} (content-type=${ct}): ${snippet}`,
-			);
+		if (parsed.json === null || parsed.text.trim().length === 0) {
+			throw Object.assign(new Error('Cync password login returned an invalid body'), { status: res.status });
 		}
-
 		const json: unknown = parsed.json;
-
 		if (!res.ok) {
-			this.log.error(
-				'Cync password login failed: HTTP %d %s %o',
-				res.status,
-				res.statusText,
-				json,
-			);
-			const errBody = json as CyncErrorBody;
-			throw new Error(
-				errBody.error?.msg ??
-				`Cync password login failed with status ${res.status} ${res.statusText}`,
-			);
+			const { code } = extractCyncError(json);
+			this.log.error('Cync password login failed (HTTP %d, code %s).', res.status, code ?? 'unknown');
+			throw Object.assign(new Error('Cync password login rejected'), { status: res.status, code });
 		}
 
 		const obj = json as Record<string, unknown>;
-		this.log.debug('Cync password login response: keys=%o', Object.keys(obj));
+
 
 		const accessTokenRaw = obj.access_token ?? obj.accessToken;
 		const userIdRaw = obj.user_id ?? obj.userId;
@@ -411,10 +393,7 @@ export class ConfigClient {
 				: undefined;
 
 		if (!accessToken || !userId) {
-			this.log.error(
-				'Cync password login missing access_token or user_id: %o',
-				json,
-			);
+			this.log.error('Cync password login missing required session fields.');
 			throw new Error(
 				'Cync password login response missing access_token or user_id',
 			);
@@ -448,7 +427,7 @@ export class ConfigClient {
 		this.userId = userId;
 		this.authorize = authorize ?? null;
 
-		this.log.info('Cync password login successful; userId=%s', userId);
+		this.log.info('Cync password login successful.');
 
 		return {
 			accessToken,
@@ -616,7 +595,7 @@ export class ConfigClient {
 	 * This roughly matches CyncCloudAPI.get_devices() from cync-lan, but in a
 	 * simplified, single-call interface.
 	 */
-	public async getCloudConfig(): Promise<CyncCloudConfig> {
+	public async getCloudConfig(requireRecognizedShape = false): Promise<CyncCloudConfig> {
 		this.ensureSession();
 
 		const devicesUrl = `${CYNC_API_BASE}user/${this.userId}/subscribe/devices`;
@@ -664,6 +643,13 @@ export class ConfigClient {
 			const errBody = json as CyncErrorBody;
 			const msg = errBody.error?.msg ?? 'Unknown error from Cync devices API';
 			throw new Error(msg);
+		}
+
+		if (requireRecognizedShape) {
+			const candidate = json as { data?: unknown; meshes?: unknown } | null;
+			if (!Array.isArray(json) && !Array.isArray(candidate?.data) && !Array.isArray(candidate?.meshes)) {
+				throw new Error('Unrecognized Cync cloud verification response');
+			}
 		}
 
 		// DEBUG: log high-level shape without dumping any secrets.

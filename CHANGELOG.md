@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.6-beta.3 — One-shot password reauthentication diagnostic
+
+Add an opt-in diagnostic to test password-only authentication once, inspect sanitized response metadata, verify cloud access, and atomically save a complete replacement session with rebuilt LAN authorization. Preserve existing credentials on authentication or verification failure and record a full-authentication timestamp for future observation. Automatic reauthentication remains disabled. Build, lint, and 74 tests pass. See [release notes and Synology instructions](docs/release-0.7.6-beta.3.md).
+
 ## 0.7.6-beta.2 — Inspect refresh responses safely
 
 Add opt-in `--inspect-response` and `--count` to the refresh diagnostic. Inspect nested response structure, credential comparisons, expiration metadata, consumed fields, and ignored credential candidates without exposing secrets. Preserve production parsing, scheduling, retry behavior, and credential persistence. Build, lint, and 55 tests pass. The recurring refresh rejection remains under investigation. See [release notes](docs/release-0.7.6-beta.2.md).

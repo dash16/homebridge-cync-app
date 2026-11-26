@@ -17,6 +17,8 @@ export interface CyncTokenData {
 	refreshToken?: string;
 	expiresAt?: number;
 	issuedAt?: number;
+	/** Known full-authentication time; unlike issuedAt, survives access-token refresh. */
+	authenticatedAt?: number;
 	refreshAt?: number;
 	authorize?: string;
 	lanLoginCode?: string;
@@ -90,7 +92,7 @@ export class CyncTokenStore {
 				typeof data.accessToken !== 'string' || !data.accessToken ||
 				(data.refreshToken !== undefined && typeof data.refreshToken !== 'string') ||
 				(data.refreshRejected !== undefined && typeof data.refreshRejected !== 'boolean') ||
-				[data.expiresAt, data.issuedAt, data.refreshAt].some(value => value !== undefined && !Number.isFinite(value))) {
+				[data.expiresAt, data.issuedAt, data.refreshAt, data.authenticatedAt].some(value => value !== undefined && !Number.isFinite(value))) {
 				throw new Error('Cync token file has invalid session metadata. Stored credentials were preserved.');
 			}
 			// Read metadata from the same open file, even if another process
@@ -112,6 +114,24 @@ export class CyncTokenStore {
 			await this.history.record('save_failed');
 			throw error;
 		}
+	}
+
+	/** Diagnostic transaction: verify before writing; never overwrite a concurrently changed session. */
+	public async replaceVerifiedSession(
+		expected: CyncTokenData,
+		prepare: () => Promise<CyncTokenData>,
+	): Promise<CyncTokenData | null> {
+		return this.withLock(async () => {
+			const current = await this.load();
+			if (!current || JSON.stringify(current) !== JSON.stringify(expected)) {
+				return null;
+			}
+			// Caller must bound network requests below the stale-lock recovery threshold.
+			// Failures leave the original credential file untouched.
+			const replacement = await prepare();
+			await this.saveUnlocked(replacement);
+			return replacement;
+		});
 	}
 
 	private async saveUnlocked(data: CyncTokenData): Promise<void> {

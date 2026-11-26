@@ -1,6 +1,6 @@
 /** Diagnostic-only serialization. No raw values or untrusted field names leave this module. */
 const names = new Set([
-	'access_token', 'accessToken', 'refresh_token', 'refreshToken', 'expires_at', 'expiresAt',
+	'authorize', 'user_id', 'userId', 'access_token', 'accessToken', 'refresh_token', 'refreshToken', 'expires_at', 'expiresAt',
 	'expire_in', 'expires_in', 'expireIn', 'expiresIn', 'token', 'tokens', 'data', 'result', 'session',
 	'credentials', 'auth', 'authentication', 'jwt', 'accessJwt', 'refreshJwt', 'refresh_jwt', 'access_jwt',
 	'renewal_token', 'renewalToken', 'refresh', 'access', 'error', 'code', 'msg', 'message',
@@ -24,6 +24,7 @@ export interface RefreshInspectionOptions {
 
 export function inspectRefreshResponse(
 	body: unknown, status: number, contentType: string | null | undefined, previousAccess: string, previousRefresh: string,
+	parser: 'refresh' | 'password' = 'refresh',
 ) {
 	const fields: Record<string, unknown>[] = [];
 	const root = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
@@ -42,7 +43,8 @@ export function inspectRefreshResponse(
 		const credential = /token|jwt|credential|authorize|authorization|password|secret|cookie|verification|otp/.test(normalized)
 			|| normalized === 'refresh' || normalized === 'access'
 			|| (typeof value === 'string' && (value === previousAccess || value === previousRefresh));
-		const row: Record<string, unknown> = { path, type, parserRecognized: depth === 1 && parserNames.has(key) };
+		const row: Record<string, unknown> = { path, type, parserRecognized: depth === 1
+			&& (parserNames.has(key) || (parser === 'password' && ['authorize', 'user_id', 'userId'].includes(key))) };
 		if (credential) {
 			row.credential = true;
 			row.matchesAccess = comparison(value, previousAccess);

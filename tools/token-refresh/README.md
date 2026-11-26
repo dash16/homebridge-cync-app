@@ -170,3 +170,10 @@ possible overlooked replacements. A fresh successful exchange with an omitted
 or identical refresh token still **does not prove a 30-day refresh-token lifetime**.
 That requires server metadata, protocol documentation, or additional observations
 of rejection over time, accounting for other clients and session revocation.
+
+## Password reauthentication experiment
+
+A separate [one-shot password diagnostic](../password-reauth/README.md) investigates
+whether the existing password endpoint can issue a verified replacement session.
+It is available starting in 0.7.6-beta.3, is opt-in, and does not enable
+production reauthentication.

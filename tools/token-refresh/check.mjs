@@ -9,12 +9,16 @@ import { CyncTokenStore } from '../../dist/cync/token-store.js';
 const quiet = { debug() {}, info() {}, warn() {}, error() {} };
 const expiry = token => Number.isFinite(token?.expiresAt) ? new Date(token.expiresAt).toISOString() : null;
 
-export async function checkRefresh(storagePath, emit = event => process.stdout.write(`${JSON.stringify(event)}\n`)) {
+export async function checkRefresh(storagePath, emit = event => process.stdout.write(`${JSON.stringify(event)}\n`),
+	{ count = 2, inspectResponse = false } = {}) {
+	if (!Number.isSafeInteger(count) || count < 1) {
+		throw new Error('Count must be a positive integer');
+	}
 	let phase = 'load';
 	let attempt = 0;
 	const report = fields => emit({ time: new Date().toISOString(), ...fields });
 	try {
-		for (attempt = 1; attempt <= 2; attempt++) {
+		for (attempt = 1; attempt <= count; attempt++) {
 			// Recreate both objects so the second attempt cannot rely on memory.
 			const store = new CyncTokenStore(storagePath);
 			const client = new ConfigClient(quiet);
@@ -29,7 +33,8 @@ export async function checkRefresh(storagePath, emit = event => process.stdout.w
 			let exchanged = false;
 			const next = await store.refresh(before, async value => {
 				exchanged = true;
-				return client.refreshAccessToken(value);
+				return client.refreshAccessToken(value, inspectResponse ? { previousAccessToken: before.accessToken,
+					emit: event => report({ ...event, attempt }) } : undefined);
 			}, false);
 			report({ event: 'refresh_saved', attempt, exchanged,
 				accessTokenChanged: next.accessToken !== before.accessToken,
@@ -51,7 +56,7 @@ export async function checkRefresh(storagePath, emit = event => process.stdout.w
 				return false;
 			}
 		}
-		report({ event: 'passed', refreshes: 2, cloudChecks: 2 });
+		report({ event: 'passed', refreshes: count, cloudChecks: count });
 		return true;
 	} catch (error) {
 		// Do not print error.message, stack, body, or arbitrary exception fields.
@@ -67,13 +72,15 @@ export async function checkRefresh(storagePath, emit = event => process.stdout.w
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	try {
-		const { values } = parseArgs({ options: { storage: { type: 'string' }, help: { type: 'boolean' } } });
+		const { values } = parseArgs({ options: { storage: { type: 'string' }, help: { type: 'boolean' },
+			count: { type: 'string' }, 'inspect-response': { type: 'boolean' } } });
 		if (values.help || !values.storage) {
 			process.stdout.write('Usage: npm run check:token-refresh -- --storage /absolute/homebridge/storage\n' +
-				'Runs two live refreshes, saves replacement credentials, and verifies cloud access.\n');
+				'Options: --count N (default 2), --inspect-response. Saves credentials and verifies cloud access.\n');
 			process.exitCode = values.help ? 0 : 2;
 		} else {
-			process.exitCode = await checkRefresh(values.storage) ? 0 : 1;
+			process.exitCode = await checkRefresh(values.storage, undefined, { count: values.count === undefined ? 2 : Number(values.count),
+				inspectResponse: values['inspect-response'] === true }) ? 0 : 1;
 		}
 	} catch {
 		process.stderr.write('Invalid arguments. Use --help.\n');

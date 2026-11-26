@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.6-beta.2 — Inspect refresh responses safely
+
+Add opt-in `--inspect-response` and `--count` to the refresh diagnostic. Inspect nested response structure, credential comparisons, expiration metadata, consumed fields, and ignored credential candidates without exposing secrets. Preserve production parsing, scheduling, retry behavior, and credential persistence. Build, lint, and 55 tests pass. The recurring refresh rejection remains under investigation. See [release notes](docs/release-0.7.6-beta.2.md).
+
 ## 0.7.6-beta.1 — Persistent authentication diagnostics
 
 Add bounded, secret-free authentication history across plugin and UI processes, retained after sign-out and restart. Preserve real 2FA error codes to stop retrying rejected verification codes, and remove verification codes from constructor debug output. See [beta notes and collection instructions](docs/release-0.7.6-beta.1.md). The underlying intermittent session rejection is still under investigation.

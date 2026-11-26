@@ -1,3 +1,4 @@
+import { inspectRefreshResponse, emitInspection, type RefreshInspectionOptions } from './refresh-inspection.js';
 // src/cync/config-client.ts
 // Cync cloud configuration & login client.
 // Handles 2FA email flow and basic device/config queries against api.gelighting.com.
@@ -469,7 +470,7 @@ export class ConfigClient {
 	 * This mirrors the 2FA login flow in shape, but only exchanges the
 	 * refresh_token for a new access_token (and possibly a new refresh_token).
 	 */
-	public async refreshAccessToken(refreshToken: string): Promise<CyncRefreshResponse> {
+	public async refreshAccessToken(refreshToken: string, inspection?: RefreshInspectionOptions): Promise<CyncRefreshResponse> {
 		// Token Refresh Endpoint: Exchanges refresh_token for a new access token.
 		// The correct endpoint is /v2/user/token/refresh (NOT /v2/user_auth/refresh). :contentReference[oaicite:1]{index=1}
 		const url = `${CYNC_API_BASE}user/token/refresh`;
@@ -491,8 +492,19 @@ export class ConfigClient {
 		})) as HttpResponse;
 
 		const parsed = await this.readBodyOnce(res);
+		const structure = inspection ? inspectRefreshResponse(parsed.json, res.status, parsed.contentType,
+			inspection.previousAccessToken, refreshToken) : undefined;
+		if (structure) {
+			emitInspection(inspection, structure);
+		}
+		const reportParsed = (outcome: string, consumed: string[], refreshCredential = 'unrecognized') => {
+			emitInspection(inspection, { event: 'response_parsed', outcome, consumed, refreshCredential,
+				ignoredCredentialFields: structure?.fields.filter(field => field.credential && !consumed.includes(field.path as string))
+					.map(field => field.path) ?? [] });
+		};
 
 		if (parsed.text.trim().length === 0) {
+			reportParsed('empty_body', []);
 			const ct = parsed.contentType ?? 'unknown';
 			const msg = `Cync refresh returned empty body (HTTP ${res.status} ${res.statusText}, content-type=${ct})`;
 			this.log.error(msg);
@@ -500,6 +512,7 @@ export class ConfigClient {
 		}
 
 		if (parsed.json === null) {
+			reportParsed('non_json', []);
 			const ct = parsed.contentType ?? 'unknown';
 			const snippet = parsed.text.trim().slice(0, 300);
 			const msg = `Cync refresh returned non-JSON body (HTTP ${res.status} ${res.statusText}, content-type=${ct}): ${snippet}`;
@@ -510,6 +523,7 @@ export class ConfigClient {
 		const json: unknown = parsed.json;
 
 		if (!res.ok) {
+			reportParsed('http_error', []);
 			this.log.error(
 				'Cync refresh failed: HTTP %d %s %o',
 				res.status,
@@ -530,6 +544,12 @@ export class ConfigClient {
 		const obj = json as Record<string, unknown>;
 		this.log.debug('Cync refresh response: keys=%o', Object.keys(obj));
 
+		const consumed: string[] = [];
+		const selected = (keys: string[]) => keys.find(key => obj[key] !== null && obj[key] !== undefined);
+		const accessKey = selected(['access_token', 'accessToken']);
+		const refreshKey = selected(['refresh_token', 'refreshToken']);
+		const absoluteKey = selected(['expires_at', 'expiresAt']);
+		const relativeKey = selected(['expire_in', 'expires_in', 'expireIn', 'expiresIn']);
 		const accessTokenRaw = obj.access_token ?? obj.accessToken;
 		const refreshTokenRaw = obj.refresh_token ?? obj.refreshToken;
 
@@ -547,15 +567,18 @@ export class ConfigClient {
 
 		if (!accessToken) {
 			this.log.error('Cync refresh missing access_token: %o', json);
+			reportParsed('missing_access_token', []);
 			throw new Error('Cync refresh response missing access_token');
 		}
 
+		consumed.push(`$.${accessKey}`);
 		const next: CyncRefreshResponse = {
 			accessToken,
 		};
 
 		if (typeof refreshTokenRaw === 'string' && refreshTokenRaw.length > 0) {
 			next.refreshToken = refreshTokenRaw;
+			consumed.push(`$.${refreshKey}`);
 		}
 
 		// Prefer absolute expiresAt if present; otherwise derive from expire_in
@@ -579,8 +602,11 @@ export class ConfigClient {
 
 		if (expiresAt !== undefined) {
 			next.expiresAt = expiresAt;
+			consumed.push(`$.${typeof expiresAtRaw === 'number' || typeof expiresAtRaw === 'string' ? absoluteKey : relativeKey}`);
 		}
 
+		reportParsed('parsed', consumed,
+			next.refreshToken === undefined ? 'absent' : next.refreshToken === refreshToken ? 'same' : 'different');
 		return next;
 	}
 

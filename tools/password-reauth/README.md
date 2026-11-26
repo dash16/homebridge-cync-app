@@ -34,8 +34,8 @@ password login. Those flows and their retry/rejection policies are unchanged.
 
 ## Running on Synology
 
-Install **0.7.6-beta.3 or later** through Homebridge UI and restart Homebridge.
-Earlier betas do not include this command. Installing the beta does not run the
+Install **0.7.6-beta.4 or later** through Homebridge UI and restart Homebridge.
+Beta.3 includes the command but not sanitized rejection messages. Installing the beta does not run the
 experiment or enable automatic password reauthentication. From a source checkout,
 run `npm run build` before invoking the diagnostic.
 
@@ -158,3 +158,23 @@ advance **estimated** session-age warnings and a clear user-assisted reauth flow
 Neither production approach is introduced here. Remaining unknowns include Cync's
 actual refresh-token lifetime, whether password login resets it, revocation of
 other sessions, trusted-device requirements, and long-term LAN/cloud behavior.
+
+## Rejected-login message inspection (beta.4)
+
+Starting with beta.4, the diagnostic emits `password_login_error` on an HTTP login
+rejection, including `sanitizedMessage` and `messageRedacted`. It is enabled only by the diagnostic inspection hook;
+normal password-login logs and exceptions still omit the upstream message.
+
+The sanitizer removes known credentials first, then retains only a fixed vocabulary
+of authentication-related words. It normalizes case and sentence punctuation and
+replaces unknown text, numbers, names, URLs, and opaque values with `[redacted]`.
+This is a lossy rendering, not a verbatim quote or authoritative classification.
+If negation or other meaning is redacted, do not infer the server's intended meaning.
+No raw message is retained for later recovery.
+
+For example, **if** the server says `Two factor authentication is required`, the
+new event can include `sanitizedMessage: "two factor authentication is required"`.
+That is a synthetic example, not the observed message for `4001381`. The actual
+November 26 beta.3 run discarded the message and left existing credentials intact.
+A new explicit live invocation with the updated diagnostic is needed to capture it.
+Do not repeatedly invoke beta.3 expecting additional message detail.

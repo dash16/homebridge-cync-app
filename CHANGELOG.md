@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.6-beta.4 — Sanitized password-login rejection messages
+
+Add a diagnostic-only `password_login_error` event with allowlisted authentication wording and explicit redaction indicators. Preserve one-shot authentication, credential safety, and existing recovery behavior. Error `4001381` remains unclassified pending observed message evidence. Build, lint, and 78 tests pass. See [release notes](docs/release-0.7.6-beta.4.md).
+
 ## 0.7.6-beta.3 — One-shot password reauthentication diagnostic
 
 Add an opt-in diagnostic to test password-only authentication once, inspect sanitized response metadata, verify cloud access, and atomically save a complete replacement session with rebuilt LAN authorization. Preserve existing credentials on authentication or verification failure and record a full-authentication timestamp for future observation. Automatic reauthentication remains disabled. Build, lint, and 74 tests pass. See [release notes and Synology instructions](docs/release-0.7.6-beta.3.md).

@@ -176,3 +176,17 @@ test('ambiguous configuration makes no authentication request', async t => {
 	assert.equal(calls.length, 0);
 	assert.equal(await readFile(h.file, 'utf8'), h.bytes);
 });
+
+test('4001381 includes only sanitized message wording and does not guess its meaning', async t => {
+	const h = await setup(t);
+	mockServer(t, { error: { code: 4001381,
+		msg: 'Two factor authentication required for private-email password secret-password token secret-old-refresh' } }, 400);
+	assert.equal(await checkPasswordReauth(h.root, h.emit), false);
+	const event = h.events.find(row => row.event === 'password_login_error');
+	assert.equal(event.code, 4001381);
+	assert.match(event.sanitizedMessage, /two factor authentication required/);
+	assert.equal(event.messageRedacted, true);
+	assert.equal(h.events.at(-1).interpretation, 'undetermined');
+	assert.doesNotMatch(JSON.stringify(h.events), /secret-|private-/);
+	assert.equal(await readFile(h.file, 'utf8'), h.bytes);
+});

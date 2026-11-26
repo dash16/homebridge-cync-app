@@ -20,7 +20,7 @@ This plugin connects to your Cync account, discovers supported devices automatic
 
 ## Authentication diagnostics beta
 
-`0.7.6-beta.3` adds a one-shot password-reauthentication diagnostic alongside opt-in refresh-response inspection and retains automatic persistent authentication history for investigating recurring sign-in failures. Stable remains `0.7.5`. See [beta installation and diagnostic instructions](docs/release-0.7.6-beta.3.md), including the Synology Homebridge package shared-folder location. This beta also stops retrying rejected 2FA codes; the original intermittent refresh rejection remains under investigation.
+`0.7.6-beta.4` adds sanitized rejected-login messages to the one-shot password-reauthentication diagnostic alongside opt-in refresh-response inspection and retains automatic persistent authentication history for investigating recurring sign-in failures. Stable remains `0.7.5`. See [beta installation and diagnostic instructions](docs/release-0.7.6-beta.4.md), including the Synology Homebridge package shared-folder location. This beta also stops retrying rejected 2FA codes; the original intermittent refresh rejection remains under investigation.
 
 ## What's new in 0.7.5
 

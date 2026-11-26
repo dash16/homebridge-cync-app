@@ -1,3 +1,4 @@
+import { sanitizeAuthErrorMessage } from './auth-error-message.js';
 import { inspectRefreshResponse, emitInspection, type RefreshInspectionOptions } from './refresh-inspection.js';
 // src/cync/config-client.ts
 // Cync cloud configuration & login client.
@@ -357,7 +358,13 @@ export class ConfigClient {
 		}
 		const json: unknown = parsed.json;
 		if (!res.ok) {
-			const { code } = extractCyncError(json);
+			const { code, msg } = extractCyncError(json);
+			if (inspection) {
+				const sanitized = sanitizeAuthErrorMessage(msg,
+					[email, password, inspection.previousAccessToken, inspection.previousRefreshToken]);
+				emitInspection(inspection, { event: 'password_login_error', status: res.status, code,
+					sanitizedMessage: sanitized.message, messageRedacted: sanitized.redacted });
+			}
 			this.log.error('Cync password login failed (HTTP %d, code %s).', res.status, code ?? 'unknown');
 			throw Object.assign(new Error('Cync password login rejected'), { status: res.status, code });
 		}
